@@ -62,3 +62,36 @@ CREATE TABLE IF NOT EXISTS `calendar_events` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_persian_ci;
 
 SET FOREIGN_KEY_CHECKS = 1;
+
+SET NAMES utf8mb4;
+
+-- ۱. افزودن شماره موبایل به جدول کاربران
+ALTER TABLE `users` 
+  ADD COLUMN IF NOT EXISTS `phone` varchar(15) DEFAULT NULL AFTER `username`;
+
+-- ۲. ساخت جدول پوشه‌بندی جزوات (برای تفکیک دروس)
+CREATE TABLE IF NOT EXISTS `pdf_folders` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `user_id` int(11) NOT NULL,
+  `name` varchar(100) NOT NULL,
+  `color` varchar(20) DEFAULT '#4f46e5',
+  `created_at` timestamp DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_user_folder` (`user_id`),
+  CONSTRAINT `fk_folder_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_persian_ci;
+
+-- ۳. افزودن شناسه پوشه و لیست صفحات ستاره‌دار (JSON) به جدول جزوات
+ALTER TABLE `pdfs`
+  ADD COLUMN IF NOT EXISTS `folder_id` int(11) DEFAULT NULL AFTER `user_id`,
+  ADD COLUMN IF NOT EXISTS `starred_pages` text DEFAULT NULL COMMENT 'آرایه JSON از صفحات مهم ستاره‌دار' AFTER `last_page`;
+
+-- ۴. افزودن فیلدهای پیامک و محاسبه درصد تست به جدول رویدادهای تقویم
+ALTER TABLE `calendar_events`
+  ADD COLUMN IF NOT EXISTS `category_type` varchar(30) DEFAULT 'specialized' COMMENT 'specialized, review, test, exam, misc' AFTER `color`,
+  ADD COLUMN IF NOT EXISTS `send_sms` tinyint(1) DEFAULT 1 COMMENT 'آیا در صورت عدم انجام پیامک ارسال شود؟' AFTER `is_completed`,
+  ADD COLUMN IF NOT EXISTS `sms_sent` tinyint(1) DEFAULT 0 COMMENT 'آیا پیامک هشدار ارسال شده است؟' AFTER `send_sms`,
+  ADD COLUMN IF NOT EXISTS `test_correct` int(11) DEFAULT NULL AFTER `pdf_page`,
+  ADD COLUMN IF NOT EXISTS `test_wrong` int(11) DEFAULT NULL AFTER `test_correct`,
+  ADD COLUMN IF NOT EXISTS `test_blank` int(11) DEFAULT NULL AFTER `test_wrong`,
+  ADD COLUMN IF NOT EXISTS `test_percent` decimal(5,2) DEFAULT NULL AFTER `test_blank`;

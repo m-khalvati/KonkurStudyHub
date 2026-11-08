@@ -1,14 +1,12 @@
 <?php
 require_once 'config.php';
 
-// خروج از حساب کاربری
 if (isset($_GET['logout'])) {
     session_destroy();
     header("Location: auth.php");
     exit;
 }
 
-// اگر کاربر قبلاً لاگین کرده، مستقیم به داشبورد برود
 if (isset($_SESSION['user_id'])) {
     header("Location: index.php");
     exit;
@@ -18,26 +16,29 @@ $error = '';
 $success = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $action = $_POST['action'] ?? '';
+    $action   = $_POST['action'] ?? '';
     $username = trim($_POST['username'] ?? '');
     $password = $_POST['password'] ?? '';
 
     if ($action === 'register') {
         $full_name = trim($_POST['full_name'] ?? '');
-        if (empty($full_name) || empty($username) || empty($password)) {
-            $error = 'لطفاً تمامی فیلدها را پر کنید.';
+        $phone     = trim($_POST['phone'] ?? '');
+
+        if (empty($full_name) || empty($username) || empty($phone) || empty($password)) {
+            $error = 'لطفاً تمامی فیلدها از جمله شماره موبایل را پر کنید.';
+        } elseif (!preg_match('/^09[0-9]{9}$/', $phone)) {
+            $error = 'شماره موبایل معتبر نیست (فرمت صحیح: 09123456789).';
         } elseif (strlen($password) < 5) {
             $error = 'رمز عبور باید حداقل ۵ کاراکتر باشد.';
         } else {
-            // بررسی تکراری نبودن نام کاربری
             $stmt = $pdo->prepare("SELECT id FROM users WHERE username = ?");
             $stmt->execute([$username]);
             if ($stmt->fetch()) {
                 $error = 'این نام کاربری قبلاً ثبت شده است.';
             } else {
                 $hash = password_hash($password, PASSWORD_DEFAULT);
-                $stmt = $pdo->prepare("INSERT INTO users (full_name, username, password_hash) VALUES (?, ?, ?)");
-                $stmt->execute([$full_name, $username, $hash]);
+                $stmt = $pdo->prepare("INSERT INTO users (full_name, username, phone, password_hash) VALUES (?, ?, ?, ?)");
+                $stmt->execute([$full_name, $username, $phone, $hash]);
                 $success = 'ثبت‌نام با موفقیت انجام شد! اکنون وارد شوید.';
             }
         }
@@ -50,9 +51,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $user = $stmt->fetch();
 
             if ($user && password_verify($password, $user['password_hash'])) {
-                $_SESSION['user_id'] = $user['id'];
+                $_SESSION['user_id']   = $user['id'];
                 $_SESSION['full_name'] = $user['full_name'];
-                $_SESSION['username'] = $user['username'];
+                $_SESSION['username']  = $user['username'];
+                $_SESSION['phone']     = $user['phone'] ?? '';
                 header("Location: index.php");
                 exit;
             } else {
@@ -77,21 +79,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <body class="bg-slate-900 min-h-screen flex items-center justify-center p-4">
 
     <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
-        <!-- هدر باکس ورود -->
         <div class="bg-indigo-600 p-6 text-center text-white">
-            <h1 class="text-xl font-bold mb-1">سامانه مطالعه و تقویم کنکور</h1>
+            <h1 class="text-xl font-bold mb-1">سامانه هوشمند مطالعه و تقویم کنکور</h1>
             <p class="text-indigo-100 text-sm">
                 ⏱️ <?php echo DAYS_TO_KONKUR; ?> روز تا کنکور (۱۶ بهمن) باقی مانده است
             </p>
         </div>
 
-        <!-- دکمه‌های تغییر تب ورود / ثبت‌نام -->
         <div class="flex border-b border-gray-200">
             <button id="tab-login" onclick="switchTab('login')" class="w-1/2 py-3 text-sm font-bold text-indigo-600 border-b-2 border-indigo-600 bg-indigo-50/50">
                 ورود به حساب
             </button>
             <button id="tab-register" onclick="switchTab('register')" class="w-1/2 py-3 text-sm font-bold text-gray-500 hover:text-gray-700">
-                ثبت‌نام کاربر جدید
+                ثبت‌نام داوطلب جدید
             </button>
         </div>
 
@@ -125,11 +125,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             </form>
 
             <!-- فرم ثبت‌نام -->
-            <form id="form-register" method="POST" class="space-y-4 hidden">
+            <form id="form-register" method="POST" class="space-y-3.5 hidden">
                 <input type="hidden" name="action" value="register">
                 <div>
                     <label class="block text-xs font-bold text-gray-700 mb-1">نام و نام خانوادگی</label>
                     <input type="text" name="full_name" required placeholder="مثلاً: علی محمدی" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-700 mb-1">شماره موبایل (جهت دریافت پیامک پیگیری برنامه)</label>
+                    <input type="tel" name="phone" required dir="ltr" pattern="09[0-9]{9}" maxlength="11" placeholder="09123456789" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-left">
                 </div>
                 <div>
                     <label class="block text-xs font-bold text-gray-700 mb-1">نام کاربری (انگلیسی)</label>

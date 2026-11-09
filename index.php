@@ -4,8 +4,21 @@ require_login();
 
 $user_id = (int)$_SESSION['user_id'];
 
-// اطمینان از وجود ستون‌های نسخه ۲ در جدول تقویم و کاربران
+// ارتقای خودکار جداول دیتابیس (بدون نیاز به اجرای دستی SQL در phpMyAdmin)
 try {
+    $pdo->exec("
+        CREATE TABLE IF NOT EXISTS `calendar_categories` (
+          `id` int(11) NOT NULL AUTO_INCREMENT,
+          `user_id` int(11) NOT NULL,
+          `name` varchar(60) NOT NULL,
+          `color` varchar(20) NOT NULL,
+          `is_study` tinyint(1) DEFAULT 1,
+          `created_at` timestamp DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (`id`),
+          KEY `idx_user_cat` (`user_id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_persian_ci;
+    ");
+
     $uCols = $pdo->query("SHOW COLUMNS FROM `users`")->fetchAll(PDO::FETCH_COLUMN);
     if (!in_array('phone', $uCols)) {
         $pdo->exec("ALTER TABLE `users` ADD COLUMN `phone` varchar(15) DEFAULT NULL AFTER `username`");
@@ -14,6 +27,13 @@ try {
     $eCols = $pdo->query("SHOW COLUMNS FROM `calendar_events`")->fetchAll(PDO::FETCH_COLUMN);
     if (!in_array('category_type', $eCols)) {
         $pdo->exec("ALTER TABLE `calendar_events` ADD COLUMN `category_type` varchar(30) DEFAULT 'specialized' AFTER `color`");
+    }
+    if (!in_array('category_label', $eCols)) {
+        $pdo->exec("ALTER TABLE `calendar_events` ADD COLUMN `category_label` varchar(60) DEFAULT 'تخصصی' AFTER `category_type`");
+    }
+    if (!in_array('is_study', $eCols)) {
+        $pdo->exec("ALTER TABLE `calendar_events` ADD COLUMN `is_study` tinyint(1) DEFAULT 1 AFTER `category_label`");
+        $pdo->exec("UPDATE `calendar_events` SET `is_study` = 0, `category_label` = 'متفرقه' WHERE `category_type` = 'misc' OR `color` = '#7c3aed'");
     }
     if (!in_array('send_sms', $eCols)) {
         $pdo->exec("ALTER TABLE `calendar_events` ADD COLUMN `send_sms` tinyint(1) DEFAULT 1 AFTER `is_completed`");
@@ -37,13 +57,13 @@ try {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>داشبورد هوشمند مطالعه و تقویم کنکور v2.0</title>
+    <title>داشبورد هوشمند مطالعه و تقویم کنکور v2.5</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css" rel="stylesheet">
     
-    <!-- بارگذاری نسخه Universal/Legacy کتابخانه PDF.js (سازگار با ۱۰۰٪ مرورگرهای موبایل و دسکتاپ) با ۳ سرور پشتیبان -->
-    <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@2.16.105/build/pdf.min.js"
-            onerror="this.onerror=null;this.src='https://unpkg.com/pdfjs-dist@2.16.105/build/pdf.min.js';"></script>
+    <!-- بارگذاری نسخه 3.11.174 از سرور بدون اختلال jsDelivr (به همراه پشتیبان خودکار unpkg) -->
+    <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"
+            onerror="this.onerror=null;this.src='https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.min.js';"></script>
 
     <style>
         body { font-family: 'Vazirmatn', sans-serif; -webkit-tap-highlight-color: transparent; }
@@ -61,6 +81,23 @@ try {
             to { opacity: 1; transform: scale(1); }
         }
         .page-flip-anim { animation: pageFadeIn 0.18s ease-out; }
+
+        /* کارت‌های تقویم هنگام هاور روی سایر کارت‌های همپوشان قرار بگیرند */
+        .cal-event-card:hover {
+            z-index: 35 !important;
+            box-shadow: 0 10px 20px -5px rgba(0, 0, 0, 0.35);
+        }
+
+        /* قفل کردن جهت LTR روی بوم PDF برای جلوگیری ۱۰۰٪ از به هم ریختن فونت‌های فارسی و انگلیسی */
+        #pdf-canvas-wrapper,
+        #pdf-render-canvas,
+        #pdf-annot-canvas {
+            direction: ltr !important;
+            text-align: left !important;
+            unicode-bidi: isolate !important;
+            font-family: sans-serif !important;
+            letter-spacing: normal !important;
+        }
     </style>
 </head>
 <body class="bg-slate-100 text-slate-800 h-screen flex flex-col overflow-hidden select-none">
@@ -109,27 +146,33 @@ try {
     <!-- ==================================================== -->
     <main id="section-calendar" class="flex-1 flex flex-col overflow-hidden">
         
-        <div class="bg-slate-800 text-slate-200 px-3 py-1.5 flex items-center justify-between gap-2 overflow-x-auto text-[11px] md:text-xs shrink-0 border-b border-slate-700">
-            <div class="flex items-center gap-3 md:gap-6 shrink-0">
-                <div class="flex items-center gap-1">
-                    <span class="text-slate-400">برنامه هفته:</span>
+        <!-- نوار آمار تفکیک‌شده (مطالعه درسی خالص در برابر کارهای متفرقه) -->
+        <div class="bg-slate-800 text-slate-200 px-3 py-1.5 flex items-center justify-between gap-3 overflow-x-auto text-[11px] md:text-xs shrink-0 border-b border-slate-700">
+            <div class="flex items-center gap-3 md:gap-5 shrink-0">
+                <div class="flex items-center gap-1 bg-slate-900/70 px-2 py-0.5 rounded-md border border-slate-700">
+                    <span class="text-slate-400">📚 برنامه درسی:</span>
                     <span id="stat-planned-hours" class="font-extrabold text-white">0 ساعت</span>
                 </div>
-                <div class="flex items-center gap-1">
-                    <span class="text-slate-400">مطالعه واقعی:</span>
+                <div class="flex items-center gap-1 bg-emerald-950/60 px-2 py-0.5 rounded-md border border-emerald-700/50">
+                    <span class="text-emerald-300">✅ مطالعه واقعی:</span>
                     <span id="stat-completed-hours" class="font-extrabold text-emerald-400">0 ساعت</span>
                 </div>
+                <div class="flex items-center gap-1 bg-purple-950/60 px-2 py-0.5 rounded-md border border-purple-700/50" title="کارهای متفرقه جدا از ساعت مطالعه کنکور محاسبه می‌شوند">
+                    <span class="text-purple-300">🧩 کارهای متفرقه:</span>
+                    <span id="stat-misc-hours" class="font-extrabold text-purple-200">0 از 0 ساعت</span>
+                </div>
                 <div class="flex items-center gap-1">
-                    <span class="text-slate-400">میانگین تست:</span>
+                    <span class="text-slate-400">🎯 میانگین تست:</span>
                     <span id="stat-avg-percent" class="font-extrabold text-amber-300">---</span>
                 </div>
             </div>
             <div class="flex items-center gap-1 shrink-0">
-                <span class="text-slate-400 hidden sm:inline">پیشرفت کل:</span>
+                <span class="text-slate-400 hidden lg:inline">پیشرفت درسی کل:</span>
                 <span id="stat-progress-text" class="font-extrabold text-indigo-300 bg-indigo-950/80 px-2 py-0.5 rounded-md border border-indigo-700">0%</span>
             </div>
         </div>
 
+        <!-- نوار ابزار کنترل تقویم + فیلتر نمایش + کپی روز -->
         <div class="bg-white border-b border-slate-200 px-3 py-2 flex flex-wrap items-center justify-between gap-2 shrink-0">
             <div class="flex items-center gap-1.5">
                 <button type="button" onclick="navigateCalendar(-1)" class="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs font-bold transition">❮</button>
@@ -138,7 +181,15 @@ try {
                 <h2 id="calendar-range-title" class="text-xs md:text-sm font-extrabold text-slate-800 mr-1"></h2>
             </div>
 
-            <div class="flex items-center gap-2">
+            <div class="flex flex-wrap items-center gap-1.5 md:gap-2">
+                <!-- فیلتر نمایش (همه / فقط درسی / فقط متفرقه) -->
+                <div class="flex bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-[11px]">
+                    <button type="button" id="filter-all" onclick="setCalendarFilter('all')" class="px-2 py-1 rounded-md font-bold bg-white shadow-2xs text-slate-800">همه</button>
+                    <button type="button" id="filter-study" onclick="setCalendarFilter('study')" class="px-2 py-1 rounded-md font-bold text-slate-600">📚 درسی</button>
+                    <button type="button" id="filter-misc" onclick="setCalendarFilter('misc')" class="px-2 py-1 rounded-md font-bold text-slate-600">🧩 متفرقه</button>
+                </div>
+
+                <!-- تغییر نمای هفتگی / روزانه -->
                 <div class="flex bg-slate-100 p-0.5 rounded-lg border border-slate-200">
                     <button type="button" id="btn-view-week" onclick="setViewMode('week')" class="px-2.5 py-1 rounded-md text-xs font-bold bg-white shadow-2xs text-indigo-600">
                         هفتگی
@@ -148,14 +199,21 @@ try {
                     </button>
                 </div>
 
+                <!-- دکمه کپی برنامه‌های یک روز به روز دیگر -->
+                <button type="button" onclick="openCopyDayModal()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-2.5 py-1.5 rounded-lg text-xs font-bold transition" title="کپی کردن برنامه‌های یک روز به روزی دیگر">
+                    📋 <span class="hidden sm:inline">کپی روز</span>
+                </button>
+
                 <button type="button" onclick="openEventModal()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold shadow-xs transition">
                     + ثبت برنامه
                 </button>
             </div>
         </div>
 
+        <!-- نوار افقی ۷ روز هفته مخصوص موبایل و نمای روزانه -->
         <div id="mobile-week-strip" class="hidden bg-slate-50 border-b border-slate-200 px-2 py-1.5 grid-cols-7 gap-1 shrink-0"></div>
 
+        <!-- جدول ساعتی تقویم -->
         <div class="flex-1 flex flex-col overflow-hidden bg-white">
             <div class="flex border-b border-slate-200 bg-slate-50 shrink-0 pr-12 md:pr-14" id="calendar-days-header"></div>
 
@@ -173,7 +231,6 @@ try {
         
         <div id="pdf-sidebar-backdrop" onclick="closePdfSidebarMobile()" class="fixed inset-0 bg-black/60 z-30 hidden md:hidden"></div>
 
-        <!-- سایدبار پوشه‌بندی و کتابخانه جزوات -->
         <aside id="pdf-sidebar" class="w-80 max-w-[86vw] bg-white border-l border-slate-200 flex flex-col shrink-0 z-40 fixed md:static inset-y-0 right-0 transform translate-x-full md:translate-x-0 transition-transform duration-200 shadow-2xl md:shadow-none">
             <div class="p-3 border-b border-slate-200 flex items-center justify-between bg-slate-50">
                 <h3 class="font-extrabold text-xs md:text-sm text-slate-800">📚 پوشه‌ها و جزوات من</h3>
@@ -195,7 +252,6 @@ try {
             <div id="pdf-list-container" class="flex-1 overflow-y-auto p-2.5 space-y-2.5 calendar-scroll bg-slate-50/60"></div>
         </aside>
 
-        <!-- محیط اصلی مطالعه PDF -->
         <div class="flex-1 flex flex-col overflow-hidden relative bg-slate-800">
             
             <div id="pdf-top-bar" class="bg-slate-900/95 text-white border-b border-slate-700 px-2.5 py-1.5 flex items-center justify-between gap-2 shrink-0 z-20">
@@ -230,16 +286,13 @@ try {
                 </button>
             </div>
 
-            <!-- ناحیه اسکرول و رندر بوم PDF -->
             <div id="pdf-viewport-container" class="flex-1 overflow-auto p-1 sm:p-3 flex justify-center items-start calendar-scroll relative">
                 
-                <!-- نشانگر بارگذاری فایل PDF -->
                 <div id="pdf-loading-overlay" class="hidden my-auto text-center bg-slate-900/95 text-white p-6 rounded-2xl shadow-xl border border-slate-700 z-30">
                     <div class="text-3xl mb-2 animate-bounce">⏳</div>
                     <div id="pdf-loading-text" class="text-xs font-bold text-indigo-300">در حال بارگذاری و آماده‌سازی تمام صفحات جزوه...</div>
                 </div>
 
-                <!-- پیام پیش‌فرض قبل از انتخاب جزوه -->
                 <div id="pdf-empty-state" class="my-auto text-center bg-slate-900/90 text-white p-6 rounded-2xl shadow-xl max-w-xs border border-slate-700">
                     <div class="text-4xl mb-2">📖</div>
                     <h4 class="font-bold text-sm mb-1">جزوه‌ای باز نیست</h4>
@@ -254,14 +307,13 @@ try {
                     </div>
                 </div>
 
-                <!-- بوم رندر PDF + لایه علامت‌گذاری -->
-                <div id="pdf-canvas-wrapper" class="hidden relative shadow-2xl bg-white">
-                    <canvas id="pdf-render-canvas" class="block"></canvas>
-                    <canvas id="pdf-annot-canvas" class="absolute inset-0 pointer-events-none"></canvas>
+                <!-- بوم رندر PDF + لایه علامت‌گذاری (ایزوله‌شده با dir="ltr") -->
+                <div id="pdf-canvas-wrapper" dir="ltr" class="hidden relative shadow-2xl bg-white">
+                    <canvas id="pdf-render-canvas" dir="ltr" class="block"></canvas>
+                    <canvas id="pdf-annot-canvas" dir="ltr" class="absolute inset-0 pointer-events-none"></canvas>
                 </div>
             </div>
 
-            <!-- کنترل شناور ورق زدن سریع در پایین صفحه -->
             <div id="pdf-floating-bottom-bar" class="hidden fixed bottom-4 right-4 z-30 items-center gap-1.5">
                 <button type="button" onclick="changePdfPage(-1)" class="w-9 h-9 rounded-full bg-slate-900/90 text-white shadow-lg border border-slate-700 font-bold text-sm flex items-center justify-center">❮</button>
                 <span id="floating-page-pill" class="bg-slate-900/90 text-white px-3 py-1.5 rounded-full text-xs font-bold shadow-lg border border-slate-700">
@@ -270,13 +322,11 @@ try {
                 <button type="button" onclick="changePdfPage(1)" class="w-9 h-9 rounded-full bg-slate-900/90 text-white shadow-lg border border-slate-700 font-bold text-sm flex items-center justify-center">❯</button>
             </div>
 
-            <!-- دکمه شناور باز کردن جعبه ابزار علامت‌گذاری (FAB) -->
             <button type="button" id="pdf-fab-btn" onclick="toggleToolsPopup()" class="hidden fixed bottom-4 left-4 z-40 bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2.5 rounded-full shadow-2xl font-extrabold text-xs items-center gap-1.5 border-2 border-white/20 transition transform active:scale-95">
                 <span id="fab-active-icon">✋</span>
                 <span>ابزارها و علامت‌گذاری</span>
             </button>
 
-            <!-- پنجره پاپ‌آپ شناور ابزارهای PDF -->
             <div id="pdf-tools-popup" class="hidden fixed bottom-16 left-4 z-40 bg-slate-900/95 text-white p-3.5 rounded-2xl shadow-2xl border border-slate-700 w-72 max-w-[92vw] backdrop-blur-md space-y-3 text-xs">
                 <div class="flex items-center justify-between border-b border-slate-700 pb-2">
                     <span class="font-extrabold text-slate-200">🛠️ جعبه ابزار جزوه‌خوان</span>
@@ -330,13 +380,23 @@ try {
     </section>
 
     <!-- ==================================================== -->
-    <!-- ۴. ویجت شناور تایمر پومودورو و کرنومتر مطالعه -->
+    <!-- ۴. ویجت شناور تایمر پومودورو (با قابلیت اتصال مستقیم به برنامه تقویم) -->
     <!-- ==================================================== -->
-    <div id="pomodoro-widget" class="hidden fixed top-14 left-4 z-50 bg-slate-900 text-white rounded-2xl shadow-2xl border border-slate-700 w-64 p-3.5 text-xs">
-        <div class="flex items-center justify-between border-b border-slate-800 pb-2 mb-2.5">
+    <div id="pomodoro-widget" class="hidden fixed top-14 left-4 z-50 bg-slate-900 text-white rounded-2xl shadow-2xl border border-slate-700 w-68 p-3.5 text-xs">
+        <div class="flex items-center justify-between border-b border-slate-800 pb-2 mb-2">
             <span class="font-extrabold text-amber-300 flex items-center gap-1">⏱️ تایمر مطالعه کنکور</span>
             <button type="button" onclick="togglePomodoroWidget()" class="text-slate-400 hover:text-white text-base">&times;</button>
         </div>
+
+        <!-- نام برنامه متصل شده از تقویم -->
+        <div id="pomodoro-linked-task-box" class="hidden bg-indigo-950/80 border border-indigo-700/60 rounded-xl p-2 mb-2.5">
+            <div class="text-[10px] text-indigo-300 mb-0.5">در حال مطالعه برنامه:</div>
+            <div id="pomodoro-linked-title" class="font-extrabold text-white truncate"></div>
+            <button type="button" id="btn-pomodoro-complete-task" class="mt-1.5 w-full py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-bold text-[11px] transition">
+                ✓ ثبت پایان و تیک زدن این برنامه
+            </button>
+        </div>
+
         <div class="flex bg-slate-800 p-0.5 rounded-lg mb-3 text-[11px] font-bold">
             <button type="button" onclick="setTimerMode('pomodoro')" id="tmode-pomodoro" class="flex-1 py-1 rounded-md bg-indigo-600 text-white">۲۵ دقیقه</button>
             <button type="button" onclick="setTimerMode('break')" id="tmode-break" class="flex-1 py-1 rounded-md text-slate-400">استراحت ۵</button>
@@ -356,10 +416,10 @@ try {
     </div>
 
     <!-- ==================================================== -->
-    <!-- ۵. مودال ثبت و ویرایش برنامه تقویم -->
+    <!-- ۵. مودال ثبت و ویرایش برنامه تقویم (همراه با ساخت نوع و رنگ دلخواه) -->
     <!-- ==================================================== -->
     <div id="event-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs hidden items-end sm:items-center justify-center sm:p-4 z-50">
-        <div class="bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-lg max-h-[92vh] flex flex-col overflow-hidden">
+        <div class="bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-lg max-h-[94vh] flex flex-col overflow-hidden">
             <div class="bg-slate-800 text-white px-4 py-3 flex items-center justify-between shrink-0">
                 <h3 id="modal-title" class="font-bold text-xs md:text-sm">ثبت برنامه مطالعاتی</h3>
                 <button type="button" onclick="closeEventModal()" class="text-slate-400 hover:text-white text-xl leading-none">&times;</button>
@@ -376,49 +436,63 @@ try {
                 <div class="grid grid-cols-3 gap-2">
                     <div>
                         <label class="block font-bold text-slate-700 mb-1">تاریخ *</label>
-                        <select id="ev-date" name="g_date" required class="w-full px-2 py-2 border border-slate-300 rounded-lg bg-white text-[11px]"></select>
+                        <select id="ev-date" name="g_date" onchange="checkLiveOverlapWarning()" required class="w-full px-2 py-2 border border-slate-300 rounded-lg bg-white text-[11px]"></select>
                     </div>
                     <div>
                         <label class="block font-bold text-slate-700 mb-1">از ساعت *</label>
-                        <input type="time" id="ev-start" name="start_time" required class="w-full px-2 py-2 border border-slate-300 rounded-lg text-center">
+                        <input type="time" id="ev-start" name="start_time" oninput="checkLiveOverlapWarning()" required class="w-full px-2 py-2 border border-slate-300 rounded-lg text-center">
                     </div>
                     <div>
                         <label class="block font-bold text-slate-700 mb-1">تا ساعت *</label>
-                        <input type="time" id="ev-end" name="end_time" required class="w-full px-2 py-2 border border-slate-300 rounded-lg text-center">
+                        <input type="time" id="ev-end" name="end_time" oninput="checkLiveOverlapWarning()" required class="w-full px-2 py-2 border border-slate-300 rounded-lg text-center">
                     </div>
                 </div>
 
-                <div>
-                    <label class="block font-bold text-slate-700 mb-1">نوع و رنگ برنامه</label>
-                    <div class="grid grid-cols-3 sm:grid-cols-5 gap-1.5">
-                        <label class="flex items-center gap-1 cursor-pointer bg-slate-50 px-2 py-1.5 rounded-lg border hover:border-indigo-400">
-                            <input type="radio" name="color" value="#4f46e5" checked>
-                            <span class="w-2.5 h-2.5 rounded-full bg-indigo-600 shrink-0"></span>
-                            <span class="text-[11px] font-bold">تخصصی</span>
-                        </label>
-                        <label class="flex items-center gap-1 cursor-pointer bg-slate-50 px-2 py-1.5 rounded-lg border hover:border-emerald-400">
-                            <input type="radio" name="color" value="#059669">
-                            <span class="w-2.5 h-2.5 rounded-full bg-emerald-600 shrink-0"></span>
-                            <span class="text-[11px] font-bold">مرور</span>
-                        </label>
-                        <label class="flex items-center gap-1 cursor-pointer bg-slate-50 px-2 py-1.5 rounded-lg border hover:border-amber-400">
-                            <input type="radio" name="color" value="#d97706">
-                            <span class="w-2.5 h-2.5 rounded-full bg-amber-600 shrink-0"></span>
-                            <span class="text-[11px] font-bold">تست‌زنی</span>
-                        </label>
-                        <label class="flex items-center gap-1 cursor-pointer bg-slate-50 px-2 py-1.5 rounded-lg border hover:border-rose-400">
-                            <input type="radio" name="color" value="#e11d48">
-                            <span class="w-2.5 h-2.5 rounded-full bg-rose-600 shrink-0"></span>
-                            <span class="text-[11px] font-bold">آزمون</span>
-                        </label>
-                        <label class="flex items-center gap-1 cursor-pointer bg-slate-50 px-2 py-1.5 rounded-lg border hover:border-purple-400 col-span-2 sm:col-span-1">
-                            <input type="radio" name="color" value="#7c3aed">
-                            <span class="w-2.5 h-2.5 rounded-full bg-purple-600 shrink-0"></span>
-                            <span class="text-[11px] font-bold">متفرقه</span>
-                        </label>
+                <!-- هشدار زنده همپوشانی زمانی -->
+                <div id="overlap-warning-box" class="hidden bg-amber-50 border border-amber-300 text-amber-900 px-3 py-2 rounded-xl text-[11px] font-bold"></div>
+
+                <!-- انتخاب نوع و رنگ برنامه (۵ دسته اصلی + دسته‌های سفارشی کاربر + فرم افزودن نوع جدید) -->
+                <div class="space-y-2">
+                    <div class="flex items-center justify-between">
+                        <label class="font-bold text-slate-700">نوع و رنگ برنامه</label>
+                        <button type="button" onclick="toggleNewCategoryBox()" class="text-[11px] bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 px-2.5 py-1 rounded-lg font-bold transition">
+                            🎨 + تعریف نوع و رنگ جدید
+                        </button>
+                    </div>
+
+                    <!-- لیست رادیویی دسته‌ها (اصلی + سفارشی کاربر) -->
+                    <div id="event-categories-grid" class="grid grid-cols-3 sm:grid-cols-4 gap-1.5">
+                        <!-- توسط جاوااسکریپت رندر می‌شود -->
+                    </div>
+
+                    <!-- باکس بازشوی ساخت نوع و رنگ سفارشی (به‌جز ۵ رنگ اصلی) -->
+                    <div id="new-category-box" class="hidden bg-slate-100 p-3 rounded-xl border border-slate-300 space-y-2.5">
+                        <div class="flex items-center justify-between">
+                            <span class="font-extrabold text-slate-800 text-[11px]">افزودن نوع برنامه سفارشی</span>
+                            <button type="button" onclick="toggleNewCategoryBox()" class="text-slate-400 hover:text-slate-700 text-sm font-bold">&times;</button>
+                        </div>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <input type="text" id="new-cat-name" placeholder="نام نوع (مثلاً: کلاس آنلاین، ورزش...)" class="px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white text-xs">
+                            <select id="new-cat-is-study" class="px-2 py-1.5 border border-slate-300 rounded-lg bg-white text-xs font-bold">
+                                <option value="1">📚 جزو ساعات مطالعه درسی حساب شود</option>
+                                <option value="0">🧩 جزو کارهای متفرقه حساب شود</option>
+                            </select>
+                        </div>
+                        <div>
+                            <span class="block text-[10px] font-bold text-slate-600 mb-1">انتخاب رنگ اختصاصی (متمایز از ۵ رنگ اصلی):</span>
+                            <div id="custom-color-palette" class="flex flex-wrap items-center gap-2">
+                                <!-- پالت ۱۰ رنگ غیر اصلی توسط JS ساخته می‌شود -->
+                            </div>
+                        </div>
+                        <div class="flex justify-end">
+                            <button type="button" onclick="saveNewCustomCategory()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-1.5 rounded-lg font-bold text-[11px]">
+                                + ذخیره و انتخاب این نوع
+                            </button>
+                        </div>
                     </div>
                 </div>
 
+                <!-- تکرار روتین در طول هفته + تنظیم پیامک یادآوری sms.ir -->
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 bg-slate-50 p-2.5 rounded-xl border border-slate-200">
                     <div id="repeat-mode-wrapper">
                         <label class="block font-bold text-slate-700 mb-1">🔁 تکرار روتین در این هفته</label>
@@ -436,6 +510,7 @@ try {
                     </div>
                 </div>
 
+                <!-- اتصال مستقیم به جزوه PDF -->
                 <div class="bg-indigo-50/70 p-2.5 rounded-xl border border-indigo-100 space-y-2">
                     <label class="block font-bold text-indigo-900">📎 اتصال به جزوه PDF و شماره صفحه (اختیاری)</label>
                     <div class="grid grid-cols-3 gap-2">
@@ -453,6 +528,7 @@ try {
                     </button>
                 </div>
 
+                <!-- ثبت آمار تست و محاسبه خودکار درصد کنکوری -->
                 <div class="bg-amber-50/70 p-2.5 rounded-xl border border-amber-200/80 space-y-2">
                     <div class="flex items-center justify-between">
                         <label class="font-bold text-amber-900">📊 ثبت عملکرد تست‌زنی (محاسبه با نمره منفی)</label>
@@ -474,6 +550,16 @@ try {
                 <div>
                     <label class="block font-bold text-slate-700 mb-1">توضیحات تکمیلی</label>
                     <textarea id="ev-desc" name="description" rows="2" placeholder="شماره تست‌ها یا نکات..." class="w-full px-3 py-1.5 border border-slate-300 rounded-lg"></textarea>
+                </div>
+
+                <!-- نوار ابزارهای عملیاتی ویژه برنامه موجود (انتقال به فردا + شروع تایمر پومودورو) -->
+                <div id="edit-extra-actions" class="hidden grid grid-cols-2 gap-2 pt-1">
+                    <button type="button" onclick="moveCurrentEventToTomorrow()" class="py-1.5 px-2 bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 rounded-lg font-bold text-[11px] flex items-center justify-center gap-1">
+                        <span>⏭️ انتقال برنامه به فردا</span>
+                    </button>
+                    <button type="button" onclick="startPomodoroForCurrentEvent()" class="py-1.5 px-2 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-lg font-bold text-[11px] flex items-center justify-center gap-1">
+                        <span>▶️ شروع تایمر برای این برنامه</span>
+                    </button>
                 </div>
 
                 <div class="flex items-center justify-between pt-2 border-t border-slate-200">
@@ -500,7 +586,37 @@ try {
     </div>
 
     <!-- ==================================================== -->
-    <!-- ۶. مودال ساخت پوشه درسی جدید -->
+    <!-- ۶. مودال کپی کردن برنامه‌های یک روز به روزی دیگر -->
+    <!-- ==================================================== -->
+    <div id="copy-day-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs hidden items-center justify-center p-4 z-50">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
+            <div class="bg-slate-800 text-white px-4 py-3 flex items-center justify-between">
+                <h3 class="font-bold text-xs md:text-sm">📋 کپی برنامه‌های یک روز به روز دیگر</h3>
+                <button type="button" onclick="closeCopyDayModal()" class="text-slate-400 hover:text-white text-xl leading-none">&times;</button>
+            </div>
+            <form onsubmit="handleCopyDay(event)" class="p-4 space-y-3.5 text-xs">
+                <div>
+                    <label class="block font-bold text-slate-700 mb-1">کپی برنامه‌ها از روز (مبدا):</label>
+                    <select id="copy-source-date" required class="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"></select>
+                </div>
+                <div>
+                    <label class="block font-bold text-slate-700 mb-1">به روز (مقصد):</label>
+                    <select id="copy-target-date" required class="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white"></select>
+                </div>
+                <label class="flex items-center gap-2 cursor-pointer pt-1">
+                    <input type="checkbox" id="copy-only-study" value="1" checked class="w-4 h-4 accent-indigo-600 rounded">
+                    <span class="font-bold text-slate-700">فقط برنامه‌های درسی کپی شوند (حذف متفرقه‌ها)</span>
+                </label>
+                <div class="flex justify-end gap-2 pt-2 border-t">
+                    <button type="button" onclick="closeCopyDayModal()" class="px-3 py-1.5 bg-slate-100 rounded-lg font-bold">انصراف</button>
+                    <button type="submit" class="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold">کپی برنامه‌ها</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- ==================================================== -->
+    <!-- ۷. مودال ساخت پوشه درسی جدید -->
     <!-- ==================================================== -->
     <div id="folder-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs hidden items-center justify-center p-4 z-50">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
@@ -529,7 +645,7 @@ try {
     </div>
 
     <!-- ==================================================== -->
-    <!-- ۷. مودال انتقال جزوه به پوشه دیگر -->
+    <!-- ۸. مودال انتقال جزوه به پوشه دیگر -->
     <!-- ==================================================== -->
     <div id="move-pdf-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs hidden items-center justify-center p-4 z-50">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
@@ -554,7 +670,7 @@ try {
     </div>
 
     <!-- ==================================================== -->
-    <!-- ۸. مودال آپلود جزوه PDF -->
+    <!-- ۹. مودال آپلود جزوه PDF -->
     <!-- ==================================================== -->
     <div id="upload-pdf-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs hidden items-center justify-center p-4 z-50">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
@@ -586,7 +702,7 @@ try {
     </div>
 
     <!-- ==================================================== -->
-    <!-- ۹. مودال نمایش صفحات ستاره‌دار جزوه فعال -->
+    <!-- ۱۰. مودال نمایش صفحات ستاره‌دار جزوه فعال -->
     <!-- ==================================================== -->
     <div id="starred-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs hidden items-center justify-center p-4 z-50">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
@@ -599,7 +715,7 @@ try {
     </div>
 
     <!-- ==================================================== -->
-    <!-- ۱۰. مودال تنظیمات شماره موبایل و پیامک یادآوری sms.ir -->
+    <!-- ۱۱. مودال تنظیمات شماره موبایل و پیامک یادآوری sms.ir -->
     <!-- ==================================================== -->
     <div id="phone-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs hidden items-center justify-center p-4 z-50">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
@@ -628,24 +744,24 @@ try {
 
     <script>
         // ====================================================
-        // ۰. تضمین بارگذاری صددرصدی PDF.js در تمام مرورگرها و اینترنت‌های موبایل
+        // ۰. تضمین بارگذاری صددرصدی PDF.js در تمام مرورگرها
         // ====================================================
         const PDFJS_CDN_LIST = [
             {
+                lib: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js',
+                worker: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js',
+                cmaps: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/',
+                fonts: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/standard_fonts/'
+            },
+            {
+                lib: 'https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.min.js',
+                worker: 'https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js',
+                cmaps: 'https://unpkg.com/pdfjs-dist@3.11.174/cmaps/',
+                fonts: 'https://unpkg.com/pdfjs-dist@3.11.174/standard_fonts/'
+            },
+            {
                 lib: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@2.16.105/build/pdf.min.js',
                 worker: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@2.16.105/build/pdf.worker.min.js',
-                cmaps: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@2.16.105/cmaps/',
-                fonts: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@2.16.105/standard_fonts/'
-            },
-            {
-                lib: 'https://unpkg.com/pdfjs-dist@2.16.105/build/pdf.min.js',
-                worker: 'https://unpkg.com/pdfjs-dist@2.16.105/build/pdf.worker.min.js',
-                cmaps: 'https://unpkg.com/pdfjs-dist@2.16.105/cmaps/',
-                fonts: 'https://unpkg.com/pdfjs-dist@2.16.105/standard_fonts/'
-            },
-            {
-                lib: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js',
-                worker: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js',
                 cmaps: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@2.16.105/cmaps/',
                 fonts: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@2.16.105/standard_fonts/'
             }
@@ -681,20 +797,45 @@ try {
             throw new Error('موتور نمایشگر PDF به دلیل اختلال اینترنت بارگذاری نشد. لطفاً صفحه را رفرش کنید.');
         }
 
-        // تنظیم اولیه Worker در صورت لود شدن از تگ head
         if (typeof window.pdfjsLib !== 'undefined') {
             window.pdfjsLib.GlobalWorkerOptions.workerSrc = activeCdnConfig.worker;
         }
 
         // ====================================================
-        // متغیرهای پایه و تبدیل تاریخ شمسی
+        // متغیرهای پایه، دسته‌های اصلی/سفارشی و تبدیل تاریخ شمسی
         // ====================================================
         const TODAY_GREGORIAN  = "<?php echo date('Y-m-d'); ?>";
         const KONKUR_GREGORIAN = "<?php echo KONKUR_GREGORIAN_DATE; ?>";
 
         let viewMode = window.innerWidth < 768 ? 'day' : 'week';
+        let calendarFilter = 'all'; // 'all', 'study', 'misc'
         let anchorDate = new Date(TODAY_GREGORIAN + 'T00:00:00');
         let loadedEvents = [];
+        let customCategories = [];
+
+        // ۵ دسته و رنگ اصلی رزرو شده سیستم
+        const DEFAULT_CATEGORIES = [
+            { id: 'def_1', name: 'تخصصی',  color: '#4f46e5', is_study: 1, isDefault: true },
+            { id: 'def_2', name: 'مرور',   color: '#059669', is_study: 1, isDefault: true },
+            { id: 'def_3', name: 'تست‌زنی', color: '#d97706', is_study: 1, isDefault: true },
+            { id: 'def_4', name: 'آزمون',  color: '#e11d48', is_study: 1, isDefault: true },
+            { id: 'def_5', name: 'متفرقه', color: '#7c3aed', is_study: 0, isDefault: true }
+        ];
+
+        // پالت ۱۰ رنگ مجزا برای دسته‌های سفارشی کاربر (بدون تداخل با ۵ رنگ اصلی بالا)
+        const CUSTOM_ALLOWED_COLORS = [
+            { hex: '#0891b2', title: 'فیروزه‌ای' },
+            { hex: '#db2777', title: 'سرخابی' },
+            { hex: '#ea580c', title: 'نارنجی' },
+            { hex: '#65a30d', title: 'سبز لیمویی' },
+            { hex: '#0284c7', title: 'آبی آسمانی' },
+            { hex: '#854d0e', title: 'قهوه‌ای برنزی' },
+            { hex: '#334155', title: 'سرمه‌ای تیره' },
+            { hex: '#f43f5e', title: 'مرجانی' },
+            { hex: '#0d9488', title: 'سبز دریایی' },
+            { hex: '#c026d3', title: 'ارغوانی' }
+        ];
+        let selectedNewCatColor = CUSTOM_ALLOWED_COLORS[0].hex;
 
         const JALALI_MONTHS = ['فروردین','اردیبهشت','خرداد','تیر','مرداد','شهریور','مهر','آبان','آذر','دی','بهمن','اسفند'];
         const WEEKDAY_NAMES = ['شنبه','یکشنبه','دوشنبه','سه‌شنبه','چهارشنبه','پنج‌شنبه','جمعه'];
@@ -756,8 +897,109 @@ try {
             col.innerHTML = html;
         }
 
+        function isEventStudyType(ev) {
+            if (ev.is_study !== undefined && ev.is_study !== null) {
+                return Number(ev.is_study) === 1;
+            }
+            return ev.category_type !== 'misc' && String(ev.color).toLowerCase() !== '#7c3aed';
+        }
+
         // ====================================================
-        // رندر تقویم
+        // مدیریت دسته‌ها و رنگ‌های سفارشی کاربر
+        // ====================================================
+        function initCustomColorPalette() {
+            const container = document.getElementById('custom-color-palette');
+            container.innerHTML = CUSTOM_ALLOWED_COLORS.map(c => `
+                <button type="button" onclick="selectCustomPaletteColor('${c.hex}')" data-hex="${c.hex}" title="${c.title}"
+                    class="custom-pal-btn w-6 h-6 rounded-full transition ${c.hex === selectedNewCatColor ? 'ring-2 ring-slate-900 scale-110' : 'opacity-65 hover:opacity-100'}"
+                    style="background-color:${c.hex}"></button>
+            `).join('');
+        }
+
+        function selectCustomPaletteColor(hex) {
+            selectedNewCatColor = hex;
+            initCustomColorPalette();
+        }
+
+        function toggleNewCategoryBox() {
+            const box = document.getElementById('new-category-box');
+            box.classList.toggle('hidden');
+            if (!box.classList.contains('hidden')) {
+                initCustomColorPalette();
+                document.getElementById('new-cat-name').focus();
+            }
+        }
+
+        function renderCategoryOptionsInModal(selectedColor = '#4f46e5') {
+            const grid = document.getElementById('event-categories-grid');
+            const normSelected = String(selectedColor).toLowerCase();
+            const allCats = [...DEFAULT_CATEGORIES, ...customCategories];
+
+            grid.innerHTML = allCats.map(cat => {
+                const isChecked = String(cat.color).toLowerCase() === normSelected;
+                const studyBadge = Number(cat.is_study) === 1 ? '📚' : '🧩';
+                const delBtn = cat.isDefault ? '' : `
+                    <span onclick="deleteCustomCategory(event, ${cat.id})" class="text-slate-400 hover:text-rose-600 font-extrabold px-1 mr-auto" title="حذف این نوع">&times;</span>
+                `;
+                return `
+                    <label class="flex items-center gap-1 cursor-pointer bg-slate-50 px-2 py-1.5 rounded-lg border hover:border-indigo-400 transition">
+                        <input type="radio" name="color" value="${cat.color}" ${isChecked ? 'checked' : ''}>
+                        <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background-color:${cat.color}"></span>
+                        <span class="text-[11px] font-bold truncate" title="${escapeHtml(cat.name)}">${escapeHtml(cat.name)}</span>
+                        <span class="text-[9px] opacity-75" title="${Number(cat.is_study) === 1 ? 'درسی' : 'متفرقه'}">${studyBadge}</span>
+                        ${delBtn}
+                    </label>
+                `;
+            }).join('');
+        }
+
+        async function saveNewCustomCategory() {
+            const nameInput = document.getElementById('new-cat-name');
+            const name = nameInput.value.trim();
+            const isStudy = document.getElementById('new-cat-is-study').value;
+
+            if (!name) {
+                alert('لطفاً نام نوع برنامه جدید را وارد کنید.');
+                return;
+            }
+
+            const fd = new FormData();
+            fd.append('action', 'create_category');
+            fd.append('name', name);
+            fd.append('color', selectedNewCatColor);
+            fd.append('is_study', isStudy);
+
+            const res = await fetch('api_calendar.php', { method: 'POST', body: fd });
+            const data = await res.json();
+            if (data.status === 'success') {
+                customCategories.push(data.category);
+                nameInput.value = '';
+                document.getElementById('new-category-box').classList.add('hidden');
+                renderCategoryOptionsInModal(data.category.color);
+            } else {
+                alert(data.message || 'خطا در ثبت نوع جدید');
+            }
+        }
+
+        async function deleteCustomCategory(e, catId) {
+            e.preventDefault();
+            e.stopPropagation();
+            if (!confirm('آیا این نوع سفارشی از لیست شما حذف شود؟')) return;
+
+            const fd = new FormData();
+            fd.append('action', 'delete_category');
+            fd.append('category_id', catId);
+
+            const res = await fetch('api_calendar.php', { method: 'POST', body: fd });
+            const data = await res.json();
+            if (data.status === 'success') {
+                customCategories = customCategories.filter(c => Number(c.id) !== Number(catId));
+                renderCategoryOptionsInModal('#4f46e5');
+            }
+        }
+
+        // ====================================================
+        // رندر تقویم + خلاصه ساعت مطالعه روزانه + الگوریتم چیدمان کنار هم (Side-by-Side)
         // ====================================================
         async function renderCalendar() {
             const days = computeVisibleDays();
@@ -777,20 +1019,18 @@ try {
                 stripEl.classList.remove('hidden');
                 stripEl.classList.add('grid');
                 const activeG = formatGDate(anchorDate);
-                let stripHtml = '';
-                fullWeek.forEach(wd => {
+                stripEl.innerHTML = fullWeek.map(wd => {
                     const gStr = formatGDate(wd);
                     const jInf = getJalaliInfo(wd);
                     const isSelected = (gStr === activeG);
                     const isLocked = (gStr > KONKUR_GREGORIAN);
-                    stripHtml += `
+                    return `
                         <button type="button" onclick="${isLocked ? '' : `selectDayForDailyView('${gStr}')`}" class="py-1.5 rounded-xl flex flex-col items-center justify-center transition ${isSelected ? 'bg-indigo-600 text-white shadow-xs' : 'bg-white text-slate-700 border border-slate-200'} ${isLocked ? 'opacity-40' : ''}">
                             <span class="text-[10px] font-bold">${jInf.dayName.slice(0,1)}</span>
                             <span class="text-xs font-extrabold mt-0.5">${jInf.jd}</span>
                         </button>
                     `;
-                });
-                stripEl.innerHTML = stripHtml;
+                }).join('');
             } else {
                 stripEl.classList.add('hidden');
                 stripEl.classList.remove('grid');
@@ -802,19 +1042,41 @@ try {
                 ? `${firstJ.dayName} ${firstJ.jd} ${firstJ.monthName} ${firstJ.jy}`
                 : `${firstJ.jd} ${firstJ.monthName} تا ${lastJ.jd} ${lastJ.monthName}`;
 
+            // پر کردن دراپ‌داون‌های تاریخ در مودال ثبت برنامه و مودال کپی روز
             const selectDateEl = document.getElementById('ev-date');
-            selectDateEl.innerHTML = '';
+            const copySrcEl    = document.getElementById('copy-source-date');
+            const copyDstEl    = document.getElementById('copy-target-date');
+            let dateOptsHtml = '';
             fullWeek.forEach(wd => {
                 const gStr = formatGDate(wd);
                 if (gStr <= KONKUR_GREGORIAN) {
                     const jInf = getJalaliInfo(wd);
-                    const opt = document.createElement('option');
-                    opt.value = gStr;
-                    opt.textContent = `${jInf.dayName} ${jInf.jd} ${jInf.monthName}`;
-                    selectDateEl.appendChild(opt);
+                    dateOptsHtml += `<option value="${gStr}">${jInf.dayName} ${jInf.jd} ${jInf.monthName}</option>`;
                 }
             });
+            selectDateEl.innerHTML = dateOptsHtml;
+            if (copySrcEl) copySrcEl.innerHTML = dateOptsHtml;
+            if (copyDstEl) copyDstEl.innerHTML = dateOptsHtml;
 
+            try {
+                const startG = formatGDate(fullWeek[0]);
+                const endG   = formatGDate(fullWeek[6]);
+                const res    = await fetch(`api_calendar.php?action=list&start=${startG}&end=${endG}`);
+                const data   = await res.json();
+
+                if (data.status === 'success') {
+                    loadedEvents = data.events || [];
+                    customCategories = data.custom_categories || [];
+                    if (data.user_phone) {
+                        document.getElementById('user-phone-input').value = data.user_phone;
+                    }
+                    updateCalendarStatsBar(data.stats || {});
+                }
+            } catch (err) {
+                console.error('Calendar fetch error:', err);
+            }
+
+            // ساخت هدر روزها (به همراه خلاصه ساعات مطالعه هر روز) و ستون‌های ساعتی
             let headerHtml = '';
             let gridHtml   = '';
 
@@ -825,9 +1087,36 @@ try {
                 const isKonkurDay = (gStr === KONKUR_GREGORIAN);
                 const isLocked = (gStr > KONKUR_GREGORIAN);
 
+                // محاسبه ساعات درسی برنامه‌ریزی شده و انجام‌شده برای همین روز خاص
+                const dayStudyEvents = loadedEvents.filter(e => e.g_date === gStr && isEventStudyType(e));
+                let dayPlannedMins = 0;
+                let dayDoneMins = 0;
+                dayStudyEvents.forEach(e => {
+                    const [sh, sm] = e.start_time.split(':').map(Number);
+                    const [eh, em] = e.end_time.split(':').map(Number);
+                    const dur = Math.max(0, ((eh * 60) + em) - ((sh * 60) + sm));
+                    dayPlannedMins += dur;
+                    if (Number(e.is_completed) === 1) dayDoneMins += dur;
+                });
+                const dayPlannedH = +(dayPlannedMins / 60).toFixed(1);
+                const dayDoneH    = +(dayDoneMins / 60).toFixed(1);
+                const dayPct      = dayPlannedMins > 0 ? Math.round((dayDoneMins / dayPlannedMins) * 100) : 0;
+
                 let badgeHtml = '';
-                if (isKonkurDay) badgeHtml = `<span class="block text-[9px] bg-rose-600 text-white px-1 rounded-full mt-0.5">🎯 کنکور</span>`;
-                else if (isLocked) badgeHtml = `<span class="block text-[9px] text-slate-400 mt-0.5">🔒 قفل</span>`;
+                if (isKonkurDay) {
+                    badgeHtml = `<span class="block text-[9px] bg-rose-600 text-white px-1 rounded-full mt-0.5">🎯 کنکور</span>`;
+                } else if (isLocked) {
+                    badgeHtml = `<span class="block text-[9px] text-slate-400 mt-0.5">🔒 قفل</span>`;
+                } else if (dayPlannedH > 0) {
+                    badgeHtml = `
+                        <div class="mt-1 px-1">
+                            <div class="text-[9px] font-bold text-slate-600 truncate">📚${dayPlannedH}س | <span class="text-emerald-600">✅${dayDoneH}س</span></div>
+                            <div class="w-full h-1 bg-slate-200 rounded-full overflow-hidden mt-0.5">
+                                <div class="h-full bg-emerald-500" style="width:${dayPct}%"></div>
+                            </div>
+                        </div>
+                    `;
+                }
 
                 headerHtml += `
                     <div onclick="selectDayForDailyView('${gStr}')" class="flex-1 py-1.5 px-1 text-center border-l border-slate-200 cursor-pointer hover:bg-slate-100 transition ${isToday ? 'bg-indigo-50/80' : ''}">
@@ -858,71 +1147,156 @@ try {
             headerEl.innerHTML = headerHtml;
             gridEl.innerHTML   = gridHtml;
 
-            try {
-                const startG = formatGDate(fullWeek[0]);
-                const endG   = formatGDate(fullWeek[6]);
-                const res    = await fetch(`api_calendar.php?action=list&start=${startG}&end=${endG}`);
-                const data   = await res.json();
-
-                if (data.status === 'success') {
-                    loadedEvents = data.events || [];
-                    if (data.user_phone) {
-                        document.getElementById('user-phone-input').value = data.user_phone;
-                    }
-                    drawEventsOnGrid();
-                    updateCalendarStatsBar(data.stats || {});
-                }
-            } catch (err) {
-                console.error('Calendar fetch error:', err);
-            }
-
+            drawEventsOnGrid();
             drawCurrentTimeIndicator();
         }
 
-        function drawEventsOnGrid() {
-            loadedEvents.forEach(ev => {
-                const dayCol = document.querySelector(`[data-gdate="${ev.g_date}"] .events-layer`);
-                if (!dayCol) return;
-
+        // ====================================================
+        // الگوریتم چیدمان کنار هم (Side-by-Side Collision Clustering) برای تسک‌های همپوشان
+        // ====================================================
+        function computeSideBySideLayout(dayEvents) {
+            const items = dayEvents.map(ev => {
                 const [sh, sm] = ev.start_time.split(':').map(Number);
                 const [eh, em] = ev.end_time.split(':').map(Number);
-                const startMinutes = (sh * 60) + sm;
-                const endMinutes   = (eh * 60) + em;
-                const duration     = Math.max(28, endMinutes - startMinutes);
-
-                const card = document.createElement('div');
-                card.className = 'pointer-events-auto absolute right-1 left-1 rounded-lg p-1.5 text-white shadow-md cursor-pointer overflow-hidden transition hover:brightness-95 flex flex-col justify-between border border-white/20';
-                card.style.top = `${startMinutes}px`;
-                card.style.height = `${duration}px`;
-                card.style.backgroundColor = ev.color || '#4f46e5';
-                if (Number(ev.is_completed) === 1) card.style.opacity = '0.68';
-
-                card.onclick = (e) => {
-                    e.stopPropagation();
-                    openEventModalForEdit(ev);
-                };
-
-                const checkBadge = Number(ev.is_completed) === 1 ? '✅ ' : '';
-                let badgesHtml = '<div class="flex flex-wrap gap-1 mt-0.5">';
-                if (ev.pdf_id) {
-                    badgesHtml += `<span class="bg-black/30 px-1.5 py-0.5 rounded text-[9px] font-bold">📖 ص ${ev.pdf_page}</span>`;
-                }
-                if (ev.test_percent !== null && ev.test_percent !== undefined && ev.test_percent !== '') {
-                    badgesHtml += `<span class="bg-amber-300 text-slate-900 px-1.5 py-0.5 rounded text-[9px] font-extrabold">🎯 ${ev.test_percent}%</span>`;
-                }
-                badgesHtml += '</div>';
-
-                card.innerHTML = `
-                    <div>
-                        <div class="text-[11px] font-extrabold leading-tight ${Number(ev.is_completed) === 1 ? 'line-through' : ''}">
-                            ${checkBadge}${escapeHtml(ev.title)}
-                        </div>
-                        <div class="text-[9px] opacity-90">${ev.start_time.slice(0,5)} - ${ev.end_time.slice(0,5)}</div>
-                    </div>
-                    ${badgesHtml}
-                `;
-                dayCol.appendChild(card);
+                const startMins = (sh * 60) + sm;
+                const endMins   = Math.max(startMins + 25, (eh * 60) + em);
+                return { ev, startMins, endMins, colIdx: 0, totalCols: 1 };
             });
+
+            // مرتب‌سازی بر اساس زمان شروع، و در صورت برابری، بازه طولانی‌تر اول
+            items.sort((a, b) => (a.startMins - b.startMins) || (b.endMins - a.endMins));
+
+            // گروه‌بندی رویدادهای متداخل در خوشه‌های مستقل (Clusters)
+            let clusters = [];
+            let currentCluster = [];
+            let clusterMaxEnd = -1;
+
+            items.forEach(item => {
+                if (currentCluster.length === 0) {
+                    currentCluster.push(item);
+                    clusterMaxEnd = item.endMins;
+                } else if (item.startMins < clusterMaxEnd) {
+                    currentCluster.push(item);
+                    clusterMaxEnd = Math.max(clusterMaxEnd, item.endMins);
+                } else {
+                    clusters.push(currentCluster);
+                    currentCluster = [item];
+                    clusterMaxEnd = item.endMins;
+                }
+            });
+            if (currentCluster.length > 0) clusters.push(currentCluster);
+
+            // تخصیص ستون (کنار هم) به هر رویداد داخل هر خوشه
+            clusters.forEach(cluster => {
+                const colLastEnd = [];
+                cluster.forEach(item => {
+                    let placedCol = -1;
+                    for (let c = 0; c < colLastEnd.length; c++) {
+                        if (colLastEnd[c] <= item.startMins) {
+                            placedCol = c;
+                            colLastEnd[c] = item.endMins;
+                            break;
+                        }
+                    }
+                    if (placedCol === -1) {
+                        placedCol = colLastEnd.length;
+                        colLastEnd.push(item.endMins);
+                    }
+                    item.colIdx = placedCol;
+                });
+
+                const totalCols = Math.max(1, colLastEnd.length);
+                cluster.forEach(item => {
+                    item.totalCols = totalCols;
+                });
+            });
+
+            return items;
+        }
+
+        function drawEventsOnGrid() {
+            // اعمال فیلتر نمایش (همه / فقط درسی / فقط متفرقه)
+            const filtered = loadedEvents.filter(ev => {
+                if (calendarFilter === 'study') return isEventStudyType(ev);
+                if (calendarFilter === 'misc')  return !isEventStudyType(ev);
+                return true;
+            });
+
+            // گروه‌بندی بر اساس روز
+            const byDate = {};
+            filtered.forEach(ev => {
+                if (!byDate[ev.g_date]) byDate[ev.g_date] = [];
+                byDate[ev.g_date].push(ev);
+            });
+
+            Object.keys(byDate).forEach(gDate => {
+                const dayCol = document.querySelector(`[data-gdate="${gDate}"] .events-layer`);
+                if (!dayCol) return;
+
+                const positionedItems = computeSideBySideLayout(byDate[gDate]);
+
+                positionedItems.forEach(({ ev, startMins, endMins, colIdx, totalCols }) => {
+                    const duration = Math.max(26, endMins - startMins);
+                    const widthPct = 100 / totalCols;
+                    const rightPct = colIdx * widthPct;
+
+                    const card = document.createElement('div');
+                    card.className = 'cal-event-card pointer-events-auto absolute rounded-lg p-1.5 text-white shadow-md cursor-pointer overflow-hidden transition flex flex-col justify-between border border-white/25';
+                    card.style.top    = `${startMins}px`;
+                    card.style.height = `${duration}px`;
+                    card.style.right  = `calc(${rightPct}% + 2px)`;
+                    card.style.width  = `calc(${widthPct}% - 4px)`;
+                    card.style.zIndex = String(10 + colIdx);
+                    card.style.backgroundColor = ev.color || '#4f46e5';
+
+                    if (Number(ev.is_completed) === 1) {
+                        card.style.opacity = '0.68';
+                    }
+
+                    card.onclick = (e) => {
+                        e.stopPropagation();
+                        openEventModalForEdit(ev);
+                    };
+
+                    const checkBadge = Number(ev.is_completed) === 1 ? '✅ ' : '';
+                    const catLabel = ev.category_label ? `<span class="opacity-85 text-[9px]">[${escapeHtml(ev.category_label)}]</span> ` : '';
+
+                    let badgesHtml = '<div class="flex flex-wrap gap-1 mt-0.5">';
+                    if (ev.pdf_id) {
+                        badgesHtml += `<span class="bg-black/30 px-1 py-0.5 rounded text-[9px] font-bold">📖 ص${ev.pdf_page}</span>`;
+                    }
+                    if (ev.test_percent !== null && ev.test_percent !== undefined && ev.test_percent !== '') {
+                        badgesHtml += `<span class="bg-amber-300 text-slate-900 px-1 py-0.5 rounded text-[9px] font-extrabold">🎯${ev.test_percent}%</span>`;
+                    }
+                    badgesHtml += '</div>';
+
+                    card.innerHTML = `
+                        <div class="min-w-0">
+                            <div class="text-[10px] md:text-[11px] font-extrabold leading-tight truncate ${Number(ev.is_completed) === 1 ? 'line-through' : ''}" title="${escapeHtml(ev.title)}">
+                                ${checkBadge}${catLabel}${escapeHtml(ev.title)}
+                            </div>
+                            <div class="text-[9px] opacity-90">${ev.start_time.slice(0,5)} - ${ev.end_time.slice(0,5)}</div>
+                        </div>
+                        ${badgesHtml}
+                    `;
+                    dayCol.appendChild(card);
+                });
+            });
+        }
+
+        function setCalendarFilter(filter) {
+            calendarFilter = filter;
+            ['all', 'study', 'misc'].forEach(f => {
+                const btn = document.getElementById('filter-' + f);
+                if (btn) {
+                    btn.className = (f === filter)
+                        ? 'px-2 py-1 rounded-md font-bold bg-white shadow-2xs text-indigo-600'
+                        : 'px-2 py-1 rounded-md font-bold text-slate-600';
+                }
+            });
+            document.querySelectorAll('.events-layer').forEach(el => el.innerHTML = '');
+            drawEventsOnGrid();
+            drawCurrentTimeIndicator();
         }
 
         function drawCurrentTimeIndicator() {
@@ -931,19 +1305,22 @@ try {
             const now = new Date();
             const mins = (now.getHours() * 60) + now.getMinutes();
             const line = document.createElement('div');
-            line.className = 'absolute right-0 left-0 border-t-2 border-rose-500 z-10 pointer-events-none flex items-center';
+            line.className = 'absolute right-0 left-0 border-t-2 border-rose-500 z-20 pointer-events-none flex items-center';
             line.style.top = `${mins}px`;
             line.innerHTML = `<span class="w-2.5 h-2.5 rounded-full bg-rose-500 -mr-1.5"></span>`;
             todayCol.appendChild(line);
         }
 
+        // به‌روزرسانی نوار آمار تفکیک‌شده (مطالعه درسی جدا، کارهای متفرقه جدا)
         function updateCalendarStatsBar(stats) {
-            const total = stats.total || 0;
-            const comp  = stats.completed || 0;
-            const pct   = total > 0 ? Math.round((comp / total) * 100) : 0;
-            document.getElementById('stat-progress-text').textContent = `${pct}% (${comp}/${total})`;
+            const studyTotal = stats.study_total !== undefined ? stats.study_total : (stats.total || 0);
+            const studyComp  = stats.study_completed !== undefined ? stats.study_completed : (stats.completed || 0);
+            const pct        = studyTotal > 0 ? Math.round((studyComp / studyTotal) * 100) : 0;
+
+            document.getElementById('stat-progress-text').textContent = `${pct}% (${studyComp}/${studyTotal})`;
             document.getElementById('stat-planned-hours').textContent = `${stats.planned_hours || 0} ساعت`;
             document.getElementById('stat-completed-hours').textContent = `${stats.completed_hours || 0} ساعت`;
+            document.getElementById('stat-misc-hours').textContent = `${stats.misc_completed_hours || 0} از ${stats.misc_planned_hours || 0} ساعت`;
             document.getElementById('stat-avg-percent').textContent = (stats.avg_test_percent !== null && stats.avg_test_percent !== undefined) ? `${stats.avg_test_percent}%` : '---';
         }
 
@@ -997,11 +1374,49 @@ try {
             badge.textContent = `درصد: ${pct.toFixed(1)}%`;
         }
 
+        // بررسی زنده تداخل زمانی هنگام ثبت یا ویرایش برنامه
+        function checkLiveOverlapWarning() {
+            const warnBox = document.getElementById('overlap-warning-box');
+            const gDate   = document.getElementById('ev-date').value;
+            const start   = document.getElementById('ev-start').value;
+            const end     = document.getElementById('ev-end').value;
+            const curId   = Number(document.getElementById('ev-id').value || 0);
+
+            if (!gDate || !start || !end || end <= start) {
+                warnBox.classList.add('hidden');
+                return;
+            }
+
+            const [sh, sm] = start.split(':').map(Number);
+            const [eh, em] = end.split(':').map(Number);
+            const sMins = (sh * 60) + sm;
+            const eMins = (eh * 60) + em;
+
+            const conflicts = loadedEvents.filter(ev => {
+                if (ev.g_date !== gDate || Number(ev.id) === curId) return false;
+                const [esh, esm] = ev.start_time.split(':').map(Number);
+                const [eeh, eem] = ev.end_time.split(':').map(Number);
+                const evS = (esh * 60) + esm;
+                const evE = (eeh * 60) + eem;
+                return (sMins < evE && eMins > evS);
+            });
+
+            if (conflicts.length > 0) {
+                const names = conflicts.map(c => `«${c.title} (${c.start_time.slice(0,5)}-${c.end_time.slice(0,5)})»`).join(' و ');
+                warnBox.textContent = `💡 توجه: این ساعت با برنامه ${names} همپوشانی دارد (در تقویم کنار هم نمایش داده می‌شوند).`;
+                warnBox.classList.remove('hidden');
+            } else {
+                warnBox.classList.add('hidden');
+            }
+        }
+
         function openEventModal(gDate = null, startTime = '08:00', endTime = '09:30') {
             document.getElementById('event-form').reset();
             document.getElementById('ev-id').value = '';
             document.getElementById('modal-title').textContent = 'ثبت برنامه جدید در تقویم';
             document.getElementById('repeat-mode-wrapper').classList.remove('hidden');
+            document.getElementById('edit-extra-actions').classList.add('hidden');
+            document.getElementById('new-category-box').classList.add('hidden');
             document.getElementById('live-test-percent-badge').textContent = '---';
 
             const targetDate = gDate || formatGDate(anchorDate);
@@ -1012,6 +1427,9 @@ try {
             document.getElementById('ev-date').value = targetDate;
             document.getElementById('ev-start').value = startTime;
             document.getElementById('ev-end').value = endTime;
+
+            renderCategoryOptionsInModal('#4f46e5');
+            checkLiveOverlapWarning();
 
             document.getElementById('btn-delete-event').classList.add('hidden');
             document.getElementById('btn-toggle-complete').classList.add('hidden');
@@ -1039,9 +1457,11 @@ try {
             updateLiveTestPercent();
 
             document.getElementById('repeat-mode-wrapper').classList.add('hidden');
+            document.getElementById('new-category-box').classList.add('hidden');
+            document.getElementById('edit-extra-actions').classList.remove('hidden');
 
-            const colorRadio = document.querySelector(`input[name="color"][value="${ev.color}"]`);
-            if (colorRadio) colorRadio.checked = true;
+            renderCategoryOptionsInModal(ev.color || '#4f46e5');
+            checkLiveOverlapWarning();
 
             document.getElementById('modal-title').textContent = 'ویرایش برنامه و ثبت عملکرد';
             document.getElementById('btn-delete-event').classList.remove('hidden');
@@ -1082,6 +1502,79 @@ try {
                 renderCalendar();
             } else {
                 alert(data.message || 'خطا در ذخیره برنامه');
+            }
+        }
+
+        async function moveCurrentEventToTomorrow() {
+            const id = document.getElementById('ev-id').value;
+            if (!id) return;
+            const fd = new FormData();
+            fd.append('action', 'move_to_tomorrow');
+            fd.append('id', id);
+
+            const res = await fetch('api_calendar.php', { method: 'POST', body: fd });
+            const data = await res.json();
+            if (data.status === 'success') {
+                closeEventModal();
+                renderCalendar();
+            } else {
+                alert(data.message || 'خطا در انتقال برنامه');
+            }
+        }
+
+        function startPomodoroForCurrentEvent() {
+            const id    = document.getElementById('ev-id').value;
+            const title = document.getElementById('ev-title').value;
+            if (!id) return;
+
+            closeEventModal();
+            const widget = document.getElementById('pomodoro-widget');
+            widget.classList.remove('hidden');
+
+            const box = document.getElementById('pomodoro-linked-task-box');
+            box.classList.remove('hidden');
+            document.getElementById('pomodoro-linked-title').textContent = title;
+            document.getElementById('btn-pomodoro-complete-task').onclick = async () => {
+                const fd = new FormData();
+                fd.append('action', 'toggle_complete');
+                fd.append('id', id);
+                await fetch('api_calendar.php', { method: 'POST', body: fd });
+                pauseTimer();
+                box.classList.add('hidden');
+                renderCalendar();
+            };
+
+            setTimerMode('pomodoro');
+            startPauseTimer();
+        }
+
+        // کپی برنامه‌های یک روز به روزی دیگر
+        function openCopyDayModal() {
+            const m = document.getElementById('copy-day-modal');
+            m.classList.remove('hidden');
+            m.classList.add('flex');
+        }
+
+        function closeCopyDayModal() {
+            const m = document.getElementById('copy-day-modal');
+            m.classList.add('hidden');
+            m.classList.remove('flex');
+        }
+
+        async function handleCopyDay(e) {
+            e.preventDefault();
+            const fd = new FormData();
+            fd.append('action', 'copy_day');
+            fd.append('source_date', document.getElementById('copy-source-date').value);
+            fd.append('target_date', document.getElementById('copy-target-date').value);
+            fd.append('only_study', document.getElementById('copy-only-study').checked ? '1' : '0');
+
+            const res = await fetch('api_calendar.php', { method: 'POST', body: fd });
+            const data = await res.json();
+            alert(data.message);
+            if (data.status === 'success') {
+                closeCopyDayModal();
+                renderCalendar();
             }
         }
 
@@ -1430,7 +1923,7 @@ try {
         }
 
         // ====================================================
-        // بارگذاری باینری و بدون خطای PDF (حذف کامل ارور 412 و ارور pdfjsLib)
+        // بارگذاری باینری و بدون خطای PDF (همراه با تنظیمات دقیق فونت‌های فارسی و انگلیسی)
         // ====================================================
         async function loadAndOpenPdf(pdfId, targetPage = null) {
             if (pdfList.length === 0) await fetchUserPdfs();
@@ -1448,10 +1941,8 @@ try {
             document.getElementById('pdf-loading-overlay').classList.remove('hidden');
 
             try {
-                // ۱. اطمینان از آماده بودن کتابخانه PDF.js در مرورگر موبایل/دسکتاپ
                 const pdfjs = await ensurePdfJsReady();
 
-                // ۲. دریافت کل فایل به صورت ArrayBuffer از طریق اکشن raw در PHP (جلوگیری ۱۰۰٪ از خطای 412 وب‌سرور)
                 const rawResponse = await fetch(`api_pdf.php?action=raw&pdf_id=${activePdfMeta.id}&t=${Date.now()}`, {
                     cache: 'no-store',
                     credentials: 'same-origin'
@@ -1468,12 +1959,14 @@ try {
                     await pdfDocInstance.destroy();
                 }
 
-                // ۳. ساخت سند PDF در حافظه همراه با پشتیبانی کامل از فونت‌های فارسی (CMap)
                 const loadingTask = pdfjs.getDocument({
                     data: pdfBytes,
                     cMapUrl: activeCdnConfig.cmaps,
                     cMapPacked: true,
                     standardFontDataUrl: activeCdnConfig.fonts,
+                    isEvalSupported: true,
+                    disableFontFace: false,
+                    useSystemFonts: true,
                     disableAutoFetch: true,
                     disableStream: true,
                     disableRange: true
@@ -1508,7 +2001,6 @@ try {
             }
         }
 
-        // رندر ایمن هر صفحه با مدیریت حافظه بوم در موبایل
         async function renderPdfPage(num) {
             if (!pdfDocInstance) return;
 
@@ -1544,11 +2036,9 @@ try {
 
                 const viewport = page.getViewport({ scale: scale });
 
-                // محدود کردن هوشمند ضریب پیکسل در موبایل برای جلوگیری از سفید شدن بوم در صفحات سنگین
-                const maxSafeDpr = window.innerWidth < 768 ? 1.65 : 2.0;
+                const maxSafeDpr = window.innerWidth < 768 ? 1.75 : 2.0;
                 let outputScale = Math.min(window.devicePixelRatio || 1, maxSafeDpr);
 
-                // جلوگیری از عبور ابعاد بوم از سقف حافظه مرورگرهای موبایل (حداکثر 3800 پیکسل در هر ضلع)
                 const maxCanvasDim = 3800;
                 if (viewport.width * outputScale > maxCanvasDim || viewport.height * outputScale > maxCanvasDim) {
                     outputScale = Math.min(maxCanvasDim / viewport.width, maxCanvasDim / viewport.height);
@@ -1568,6 +2058,10 @@ try {
                 ctx.fillStyle = '#ffffff';
                 ctx.fillRect(0, 0, canvas.width, canvas.height);
                 ctx.restore();
+
+                // قفل کردن جهت رندر متون بوم روی چپ‌به‌راست استاندارد PDF
+                ctx.direction = 'ltr';
+                ctx.textAlign = 'left';
 
                 const transform = outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : null;
                 activeRenderTask = page.render({ canvasContext: ctx, transform, viewport });
@@ -1887,6 +2381,7 @@ try {
 
         function drawSingleAnnotation(item, w, h) {
             annotCtx.save();
+            annotCtx.direction = 'ltr';
             if (item.type === 'highlight' || item.type === 'pen') {
                 if (!item.points || item.points.length === 0) { annotCtx.restore(); return; }
                 annotCtx.beginPath();
@@ -1910,7 +2405,7 @@ try {
                 annotCtx.lineWidth = 1.5;
                 annotCtx.fillRect(nx - boxSize / 2, ny - boxSize / 2, boxSize, boxSize);
                 annotCtx.strokeRect(nx - boxSize / 2, ny - boxSize / 2, boxSize, boxSize);
-                annotCtx.font = `bold ${Math.round(boxSize * 0.55)}px Vazirmatn, sans-serif`;
+                annotCtx.font = `bold ${Math.round(boxSize * 0.55)}px sans-serif`;
                 annotCtx.textAlign = 'center';
                 annotCtx.textBaseline = 'middle';
                 annotCtx.fillText('📌', nx, ny);

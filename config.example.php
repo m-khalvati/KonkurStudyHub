@@ -6,14 +6,14 @@ date_default_timezone_set('Asia/Tehran');
 // ۱. تنظیمات اتصال به دیتابیس MySQL هاست
 // ==========================================
 define('DB_HOST', 'localhost');
-define('DB_NAME', 'your_database_name');
-define('DB_USER', 'your_database_user');
-define('DB_PASS', 'your_database_password');
+define('DB_NAME', 'konkur_db'); // نام دیتابیس خود را وارد کنید
+define('DB_USER', 'root');      // نام کاربری دیتابیس هاست
+define('DB_PASS', '');          // رمز عبور دیتابیس هاست
 
 // ==========================================
 // ۲. تنظیمات اشتراک ویژه و فروش تلگرام
 // ==========================================
-define('TELEGRAM_SALES_ID', 'YourTelegramID'); // آیدی تلگرام فروش بدون @
+define('TELEGRAM_SALES_ID', 'YourTelegramID'); // آیدی تلگرام خود را بدون @ وارد کنید
 define('FREE_MAX_PDF_COUNT', 1);               // حداکثر تعداد PDF برای کاربر عادی (۱ فایل)
 define('FREE_MAX_PDF_MB', 3);                  // حداکثر حجم هر PDF برای کاربر عادی (۳ مگابایت)
 define('VIP_MAX_PDF_MB', 64);                  // حداکثر حجم هر PDF برای کاربر ویژه (۶۴ مگابایت)
@@ -28,6 +28,16 @@ define('SMSIR_API_KEY', 'YOUR_SMSIR_API_KEY');
 define('SMSIR_TEMPLATE_ID', 100000);
 define('SMSIR_PARAM_NAME', 'NAME');
 define('SMSIR_PARAM_TASK', 'TASK');
+
+// ==========================================
+// ۴. تنظیمات مقاله‌خوان و موتور ترجمه هوش مصنوعی (AI)
+// ==========================================
+define('AI_TRANSLATION_ENABLED', true);        // true = فعال بودن گزینه هوش مصنوعی | false = غیرفعال کردن کامل هوش مصنوعی
+define('AI_VIP_ONLY', true);                   // true = استفاده از کلید هوش مصنوعی سرور فقط مخصوص کاربران VIP باشد
+define('AI_PROVIDER', 'gemini');               // 'gemini' (گوگل) یا 'openai' (سازگار با OpenAI / OpenRouter / DeepSeek / Groq)
+define('AI_API_KEY', 'YOUR_AI_API_KEY');       // کلید API هوش مصنوعی سرور (از Google AI Studio یا OpenRouter)
+define('AI_MODEL_NAME', 'gemini-2.5-flash');   // نام مدل (مثلاً gemini-2.5-flash یا gpt-4o-mini یا deepseek-chat)
+define('AI_OPENAI_ENDPOINT', 'https://api.openai.com/v1/chat/completions'); // آدرس Endpoint در صورت انتخاب حالت openai
 
 try {
     $pdo = new PDO(
@@ -45,7 +55,7 @@ try {
 }
 
 // ==========================================
-// ۴. ارتقای خودکار دیتابیس برای سیستم اشتراک و ادمین
+// ۵. ارتقای خودکار دیتابیس (اشتراک + مقاله‌خوان + کش ترجمه)
 // ==========================================
 try {
     $uCols = $pdo->query("SHOW COLUMNS FROM `users`")->fetchAll(PDO::FETCH_COLUMN);
@@ -54,19 +64,24 @@ try {
     }
     if (!in_array('is_admin', $uCols)) {
         $pdo->exec("ALTER TABLE `users` ADD COLUMN `is_admin` tinyint(1) DEFAULT 0 AFTER `password_hash`");
-        // اولین کاربر سایت (صاحب سایت) به صورت خودکار ادمین می‌شود
         $pdo->exec("UPDATE `users` SET `is_admin` = 1 WHERE `id` = 1");
     }
     if (!in_array('vip_expires_at', $uCols)) {
         $pdo->exec("ALTER TABLE `users` ADD COLUMN `vip_expires_at` datetime DEFAULT NULL AFTER `is_admin`");
     }
 
-    // ساخت جدول کدهای فعال‌سازی اشتراک (کدهای یک‌بارمصرف ۱ ماهه و ۳ ماهه)
+    // افزودن ستون تفکیک مقالات انگلیسی (is_paper) به جدول pdfs
+    $pCols = $pdo->query("SHOW COLUMNS FROM `pdfs`")->fetchAll(PDO::FETCH_COLUMN);
+    if (!in_array('is_paper', $pCols)) {
+        $pdo->exec("ALTER TABLE `pdfs` ADD COLUMN `is_paper` tinyint(1) DEFAULT 0 COMMENT '0=جزوه درسی, 1=مقاله انگلیسی' AFTER `folder_id`");
+    }
+
+    // جدول کدهای فعال‌سازی اشتراک
     $pdo->exec("
         CREATE TABLE IF NOT EXISTS `subscription_codes` (
           `id` int(11) NOT NULL AUTO_INCREMENT,
           `code` varchar(32) NOT NULL UNIQUE,
-          `plan_type` varchar(20) NOT NULL COMMENT '1m یا 3m',
+          `plan_type` varchar(20) NOT NULL,
           `days` int(11) NOT NULL DEFAULT 30,
           `is_used` tinyint(1) DEFAULT 0,
           `used_by` int(11) DEFAULT NULL,
@@ -75,10 +90,40 @@ try {
           PRIMARY KEY (`id`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_persian_ci;
     ");
+
+    // جدول کش هوشمند ترجمه‌ها (برای جلوگیری از مصرف تکراری API)
+    $pdo->exec("
+        CREATE TABLE IF NOT EXISTS `translation_cache` (
+          `id` int(11) NOT NULL AUTO_INCREMENT,
+          `source_hash` char(32) NOT NULL,
+          `engine` varchar(20) NOT NULL,
+          `source_text` text NOT NULL,
+          `translated_text` text NOT NULL,
+          `created_at` timestamp DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (`id`),
+          UNIQUE KEY `uniq_hash_engine` (`source_hash`, `engine`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_persian_ci;
+    ");
+
+    // جدول ذخیره فیش‌ها و نکات ترجمه‌شده هر مقاله توسط کاربر
+    $pdo->exec("
+        CREATE TABLE IF NOT EXISTS `paper_notes` (
+          `id` int(11) NOT NULL AUTO_INCREMENT,
+          `user_id` int(11) NOT NULL,
+          `pdf_id` int(11) NOT NULL,
+          `page_number` int(11) NOT NULL DEFAULT 1,
+          `original_text` text NOT NULL,
+          `translated_text` text NOT NULL,
+          `user_comment` text DEFAULT NULL,
+          `created_at` timestamp DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (`id`),
+          KEY `idx_user_paper_note` (`user_id`, `pdf_id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_persian_ci;
+    ");
 } catch (Exception $ignore) {}
 
 // ==========================================
-// ۵. توابع تبدیل تاریخ میلادی و شمسی (جلالی)
+// ۶. توابع تبدیل تاریخ میلادی و شمسی (جلالی)
 // ==========================================
 function gregorian_to_jalali($gy, $gm, $gd) {
     $g_d_m = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334];
@@ -137,7 +182,7 @@ function datetime_to_jalali_str($datetime_str) {
 }
 
 // ==========================================
-// ۶. تنظیم تاریخ هدف کنکور (۱۶ بهمن)
+// ۷. تنظیم تاریخ هدف کنکور (۱۶ بهمن)
 // ==========================================
 list($cur_jy, $cur_jm, $cur_jd) = gregorian_to_jalali((int)date('Y'), (int)date('m'), (int)date('d'));
 $target_jy = ($cur_jm > 11 || ($cur_jm == 11 && $cur_jd > 16)) ? $cur_jy + 1 : $cur_jy;
@@ -152,7 +197,7 @@ $days_left = max(0, (int)round(($konkur_ts - $today_ts) / 86400));
 define('DAYS_TO_KONKUR', $days_left);
 
 // ==========================================
-// ۷. توابع بررسی و تمدید تجمعی اشتراک ویژه (VIP)
+// ۸. توابع بررسی و تمدید تجمعی اشتراک ویژه (VIP)
 // ==========================================
 function get_user_subscription_info($pdo, $user_id) {
     $stmt = $pdo->prepare("SELECT id, full_name, username, phone, is_admin, vip_expires_at FROM users WHERE id = ?");
@@ -190,7 +235,6 @@ function get_user_subscription_info($pdo, $user_id) {
     ];
 }
 
-// تمدید تجمعی اشتراک (اگر کاربر روز فعال داشته باشد، روزهای جدید به انتهای تاریخ فعلی اضافه می‌شود)
 function extend_user_subscription($pdo, $user_id, $add_days) {
     $stmt = $pdo->prepare("SELECT vip_expires_at FROM users WHERE id = ?");
     $stmt->execute([(int)$user_id]);
@@ -199,7 +243,6 @@ function extend_user_subscription($pdo, $user_id, $add_days) {
     $now = time();
     $current_exp = (!empty($row['vip_expires_at'])) ? strtotime($row['vip_expires_at']) : 0;
 
-    // اگر هنوز اشتراک فعال دارد، به تاریخ انقضای فعلی اضافه کن؛ وگرنه از همین لحظه حساب کن
     $base_ts = ($current_exp > $now) ? $current_exp : $now;
     $new_exp_str = date('Y-m-d H:i:s', strtotime("+{$add_days} days", $base_ts));
 
@@ -210,7 +253,7 @@ function extend_user_subscription($pdo, $user_id, $add_days) {
 }
 
 // ==========================================
-// ۸. تابع ارسال پیامک سریع (قالب خدماتی) با sms.ir
+// ۹. تابع ارسال پیامک سریع (قالب خدماتی) با sms.ir
 // ==========================================
 function send_smsir_verify($mobile, $user_name, $task_title) {
     if (!SMSIR_ENABLED || empty(SMSIR_API_KEY) || SMSIR_API_KEY === 'YOUR_SMSIR_API_KEY') {

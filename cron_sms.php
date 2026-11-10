@@ -2,11 +2,12 @@
 require_once 'config.php';
 header('Content-Type: application/json; charset=utf-8');
 
-$today_g = date('Y-m-d');
+$today_g  = date('Y-m-d');
 $now_time = date('H:i:s');
+$now_full = date('Y-m-d H:i:s');
 
 try {
-    // پیدا کردن برنامه‌های امروز که زمانشان گذشته، انجام نشده‌اند و هنوز پیامکی برایشان ارسال نشده است
+    // فقط برنامه‌های عقب‌افتاده کاربرانی که اشتراک ویژه (VIP) فعال دارند انتخاب می‌شوند
     $stmt = $pdo->prepare("
         SELECT e.id, e.title, e.end_time, u.full_name, u.phone
         FROM calendar_events e
@@ -18,9 +19,11 @@ try {
           AND e.sms_sent = 0
           AND u.phone IS NOT NULL
           AND u.phone != ''
+          AND u.vip_expires_at IS NOT NULL
+          AND u.vip_expires_at > ?
         LIMIT 20
     ");
-    $stmt->execute([$today_g, $now_time]);
+    $stmt->execute([$today_g, $now_time, $now_full]);
     $overdue_tasks = $stmt->fetchAll();
 
     $sent_count = 0;
@@ -28,7 +31,6 @@ try {
     foreach ($overdue_tasks as $task) {
         $res = send_smsir_verify($task['phone'], $task['full_name'], $task['title']);
 
-        // چه ارسال موفق باشد و چه در حالت تست باشد، علامت می‌زنیم تا دوباره ارسال تکراری نشود
         if ($res['status']) {
             $upd = $pdo->prepare("UPDATE calendar_events SET sms_sent = 1 WHERE id = ?");
             $upd->execute([$task['id']]);

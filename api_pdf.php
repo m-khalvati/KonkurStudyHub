@@ -11,6 +11,9 @@ if (!isset($_SESSION['user_id'])) {
 $user_id = (int)$_SESSION['user_id'];
 $action  = $_GET['action'] ?? ($_POST['action'] ?? '');
 
+// دریافت اطلاعات اشتراک کاربر (عادی یا ویژه)
+$sub_info = get_user_subscription_info($pdo, $user_id);
+
 // اطمینان از وجود پوشه آپلود و ساخت خودکار .htaccess برای جلوگیری از خطای 412 در وب‌سرور
 $upload_dir = __DIR__ . '/uploads/';
 if (!is_dir($upload_dir)) {
@@ -22,12 +25,24 @@ if (!is_file($htaccess_path)) {
     @file_put_contents($htaccess_path, $ht_content);
 }
 
+// تابع کمکی: دریافت لیست شناسه‌های PDF مجاز برای باز شدن (برای کاربر عادی فقط آخرین جزوه مجاز است)
+function get_unlocked_pdf_ids_for_user($pdo, $user_id, $is_vip) {
+    $stmt = $pdo->prepare("SELECT id FROM pdfs WHERE user_id = ? ORDER BY id DESC");
+    $stmt->execute([$user_id]);
+    $all_ids = $stmt->fetchAll(PDO::FETCH_COLUMN);
+
+    if ($is_vip) {
+        return array_map('intval', $all_ids);
+    }
+    return array_map('intval', array_slice($all_ids, 0, FREE_MAX_PDF_COUNT));
+}
+
 // ====================================================
-// اکشن ویژه: استریم مستقیم و بدون خطای فایل PDF (ضد ارور 412)
+// اکشن ویژه: استریم مستقیم و بدون خطای فایل PDF (ضد ارور 412 + بررسی قفل اشتراک)
 // ====================================================
 if ($action === 'raw') {
     $pdf_id = (int)($_GET['pdf_id'] ?? 0);
-    $stmt = $pdo->prepare("SELECT file_path FROM pdfs WHERE id = ? AND user_id = ?");
+    $stmt = $pdo->prepare("SELECT id, file_path FROM pdfs WHERE id = ? AND user_id = ?");
     $stmt->execute([$pdf_id, $user_id]);
     $row = $stmt->fetch();
 
@@ -36,13 +51,19 @@ if ($action === 'raw') {
         exit('File not found');
     }
 
+    // بررسی اینکه آیا این جزوه به دلیل اتمام اشتراک قفل شده است؟
+    $allowed_ids = get_unlocked_pdf_ids_for_user($pdo, $user_id, $sub_info['is_vip']);
+    if (!in_array((int)$row['id'], $allowed_ids, true)) {
+        http_response_code(403);
+        exit('Subscription required to open this PDF');
+    }
+
     $full_path = __DIR__ . '/' . $row['file_path'];
     if (!is_file($full_path)) {
         http_response_code(404);
         exit('Physical file missing');
     }
 
-    // پاکسازی بافرهای خروجی برای ارسال باینری خالص
     while (ob_get_level()) {
         ob_end_clean();
     }
@@ -82,7 +103,9 @@ try {
 } catch (Exception $ignore) {}
 
 try {
-    // ۱. دریافت لیست پوشه‌ها + لیست تمام جزوات کاربر
+    // ====================================================
+    // ۱. دریافت لیست پوشه‌ها + لیست جزوات + وضعیت اشتراک و قفل هر جزوه
+    // ====================================================
     if ($action === 'list') {
         $fStmt = $pdo->prepare("
             SELECT id, name, color, created_at 
@@ -105,21 +128,27 @@ try {
         $pStmt->execute([$user_id]);
         $pdfs = $pStmt->fetchAll();
 
-        foreach ($pdfs as &$pdf) {
+        foreach ($pdfs as $index => &$pdf) {
             $decoded = !empty($pdf['starred_pages']) ? json_decode($pdf['starred_pages'], true) : [];
             $pdf['starred_pages'] = is_array($decoded) ? array_values(array_map('intval', $decoded)) : [];
+
+            // اگر کاربر ویژه نیست، فقط اولین جزوه (جدیدترین جزوه) باز است و بقیه قفل می‌شوند
+            $pdf['is_locked'] = (!$sub_info['is_vip'] && $index >= FREE_MAX_PDF_COUNT);
         }
         unset($pdf);
 
         echo json_encode([
-            'status'  => 'success',
-            'folders' => $folders,
-            'pdfs'    => $pdfs
+            'status'       => 'success',
+            'folders'      => $folders,
+            'pdfs'         => $pdfs,
+            'subscription' => $sub_info
         ]);
         exit;
     }
 
+    // ====================================================
     // ۲. ساخت پوشه درسی جدید
+    // ====================================================
     if ($action === 'create_folder') {
         $name  = trim($_POST['name'] ?? '');
         $color = trim($_POST['color'] ?? '#4f46e5');
@@ -144,7 +173,9 @@ try {
         exit;
     }
 
+    // ====================================================
     // ۳. حذف پوشه
+    // ====================================================
     if ($action === 'delete_folder') {
         $folder_id = (int)($_POST['folder_id'] ?? 0);
 
@@ -158,7 +189,9 @@ try {
         exit;
     }
 
+    // ====================================================
     // ۴. انتقال یک جزوه به پوشه دیگر
+    // ====================================================
     if ($action === 'move_pdf') {
         $pdf_id    = (int)($_POST['pdf_id'] ?? 0);
         $folder_id = !empty($_POST['folder_id']) ? (int)$_POST['folder_id'] : null;
@@ -183,7 +216,9 @@ try {
         exit;
     }
 
-    // ۵. آپلود جزوه PDF جدید
+    // ====================================================
+    // ۵. آپلود جزوه PDF جدید (همراه با بررسی محدودیت تعداد و حجم کاربر عادی)
+    // ====================================================
     if ($action === 'upload') {
         $title     = trim($_POST['title'] ?? '');
         $folder_id = !empty($_POST['folder_id']) ? (int)$_POST['folder_id'] : null;
@@ -191,6 +226,62 @@ try {
 
         if (empty($title)) {
             echo json_encode(['status' => 'error', 'message' => 'لطفاً عنوان جزوه را وارد کنید.']);
+            exit;
+        }
+
+        // الف) بررسی محدودیت تعداد فایل برای کاربران عادی (حداکثر ۱ فایل)
+        if (!$sub_info['is_vip']) {
+            $cntStmt = $pdo->prepare("SELECT COUNT(*) FROM pdfs WHERE user_id = ?");
+            $cntStmt->execute([$user_id]);
+            $current_pdf_count = (int)$cntStmt->fetchColumn();
+
+            if ($current_pdf_count >= FREE_MAX_PDF_COUNT) {
+                echo json_encode([
+                    'status'   => 'error',
+                    'need_vip' => true,
+                    'message'  => 'کاربران عادی فقط می‌توانند ۱ جزوه PDF داشته باشند. برای آپلود جزوه جدید، لطفاً جزوه قبلی را حذف کنید یا اشتراک ویژه تهیه نمایید.'
+                ]);
+                exit;
+            }
+        }
+
+        // ب) بررسی خطای دریافت فایل از سمت مرورگر یا تنظیمات سرور
+        if (!isset($_FILES['pdf_file'])) {
+            echo json_encode(['status' => 'error', 'message' => 'هیچ فایلی ارسال نشده است.']);
+            exit;
+        }
+
+        $file = $_FILES['pdf_file'];
+        if ($file['error'] === UPLOAD_ERR_INI_SIZE || $file['error'] === UPLOAD_ERR_FORM_SIZE) {
+            echo json_encode([
+                'status'   => 'error',
+                'need_vip' => !$sub_info['is_vip'],
+                'message'  => 'حجم فایل انتخابی بیش از سقف مجاز است.'
+            ]);
+            exit;
+        }
+
+        if ($file['error'] !== UPLOAD_ERR_OK) {
+            echo json_encode(['status' => 'error', 'message' => 'خطا در دریافت فایل PDF. لطفاً دوباره تلاش کنید.']);
+            exit;
+        }
+
+        // ج) بررسی دقیق حجم فایل بر اساس نوع کاربری (عادی = ۳ مگابایت، ویژه = ۶۴ مگابایت)
+        $max_allowed_bytes = $sub_info['max_pdf_mb'] * 1024 * 1024;
+        if ($file['size'] > $max_allowed_bytes) {
+            $file_mb = round($file['size'] / (1024 * 1024), 1);
+            if (!$sub_info['is_vip']) {
+                echo json_encode([
+                    'status'   => 'error',
+                    'need_vip' => true,
+                    'message'  => "حجم فایل شما ({$file_mb} مگابایت) بیشتر از سقف مجاز کاربران عادی (" . FREE_MAX_PDF_MB . " مگابایت) است. برای آپلود فایل‌های حجیم، اشتراک ویژه تهیه کنید."
+                ]);
+            } else {
+                echo json_encode([
+                    'status'  => 'error',
+                    'message' => "حجم فایل ({$file_mb} مگابایت) بیش از سقف مجاز سرور (" . VIP_MAX_PDF_MB . " مگابایت) است."
+                ]);
+            }
             exit;
         }
 
@@ -205,14 +296,7 @@ try {
             }
         }
 
-        if (!isset($_FILES['pdf_file']) || $_FILES['pdf_file']['error'] !== UPLOAD_ERR_OK) {
-            echo json_encode(['status' => 'error', 'message' => 'خطا در دریافت فایل PDF. حجم فایل را بررسی کنید.']);
-            exit;
-        }
-
-        $file = $_FILES['pdf_file'];
-        $ext  = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
-
+        $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
         $finfo = finfo_open(FILEINFO_MIME_TYPE);
         $mime  = finfo_file($finfo, $file['tmp_name']);
         finfo_close($finfo);
@@ -249,13 +333,16 @@ try {
                 'file_path'     => $db_rel_path,
                 'total_pages'   => 1,
                 'last_page'     => 1,
-                'starred_pages' => []
+                'starred_pages' => [],
+                'is_locked'     => false
             ]
         ]);
         exit;
     }
 
+    // ====================================================
     // ۶. ذخیره خودکار آخرین صفحه خوانده‌شده
+    // ====================================================
     if ($action === 'save_progress') {
         $pdf_id      = (int)($_POST['pdf_id'] ?? 0);
         $last_page   = max(1, (int)($_POST['last_page'] ?? 1));
@@ -272,7 +359,9 @@ try {
         exit;
     }
 
+    // ====================================================
     // ۷. ستاره‌دار کردن / برداشتن ستاره یک صفحه مهم
+    // ====================================================
     if ($action === 'toggle_star_page') {
         $pdf_id      = (int)($_POST['pdf_id'] ?? 0);
         $page_number = max(1, (int)($_POST['page_number'] ?? 1));
@@ -314,7 +403,9 @@ try {
         exit;
     }
 
+    // ====================================================
     // ۸. حذف جزوه
+    // ====================================================
     if ($action === 'delete') {
         $pdf_id = (int)($_POST['pdf_id'] ?? 0);
 
@@ -335,7 +426,9 @@ try {
         exit;
     }
 
+    // ====================================================
     // ۹. دریافت علامت‌گذاری‌های یک صفحه خاص از جزوه
+    // ====================================================
     if ($action === 'get_annotations') {
         $pdf_id      = (int)($_GET['pdf_id'] ?? 0);
         $page_number = max(1, (int)($_GET['page_number'] ?? 1));
@@ -355,7 +448,9 @@ try {
         exit;
     }
 
+    // ====================================================
     // ۱۰. ذخیره خودکار علامت‌گذاری‌های صفحه
+    // ====================================================
     if ($action === 'save_annotations') {
         $pdf_id          = (int)($_POST['pdf_id'] ?? 0);
         $page_number     = max(1, (int)($_POST['page_number'] ?? 1));

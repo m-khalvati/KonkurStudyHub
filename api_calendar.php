@@ -8,17 +8,17 @@ if (!isset($_SESSION['user_id'])) {
     exit;
 }
 
-$user_id = (int)$_SESSION['user_id'];
-$action  = $_GET['action'] ?? ($_POST['action'] ?? '');
+$user_id  = (int)$_SESSION['user_id'];
+$action   = $_GET['action'] ?? ($_POST['action'] ?? '');
+$sub_info = get_user_subscription_info($pdo, $user_id);
 
-// ۵ رنگ اصلی رزرو شده سیستم (کاربر برای دسته‌های سفارشی از پالت مجزا استفاده می‌کند)
+// ۵ رنگ اصلی رزرو شده سیستم
 const RESERVED_MAIN_COLORS = ['#4f46e5', '#059669', '#d97706', '#e11d48', '#7c3aed'];
 
 // ====================================================
-// ۰. ارتقای خودکار دیتابیس (بدون نیاز به اجرای دستی SQL)
+// ۰. ارتقای خودکار دیتابیس تقویم
 // ====================================================
 try {
-    // ۱. ساخت جدول دسته‌بندی‌های سفارشی کاربر
     $pdo->exec("
         CREATE TABLE IF NOT EXISTS `calendar_categories` (
           `id` int(11) NOT NULL AUTO_INCREMENT,
@@ -32,19 +32,16 @@ try {
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_persian_ci;
     ");
 
-    // ۲. اطمینان از وجود ستون‌های تفکیک درسی/متفرقه و نام دسته در جدول رویدادها
     $eCols = $pdo->query("SHOW COLUMNS FROM `calendar_events`")->fetchAll(PDO::FETCH_COLUMN);
     if (!in_array('category_label', $eCols)) {
         $pdo->exec("ALTER TABLE `calendar_events` ADD COLUMN `category_label` varchar(60) DEFAULT 'تخصصی' AFTER `category_type`");
     }
     if (!in_array('is_study', $eCols)) {
         $pdo->exec("ALTER TABLE `calendar_events` ADD COLUMN `is_study` tinyint(1) DEFAULT 1 COMMENT '1=درسی, 0=متفرقه' AFTER `category_label`");
-        // هماهنگ‌سازی رکوردهای قبلی که از نوع متفرقه بوده‌اند
         $pdo->exec("UPDATE `calendar_events` SET `is_study` = 0, `category_label` = 'متفرقه' WHERE `category_type` = 'misc' OR `color` = '#7c3aed'");
     }
 } catch (Exception $ignore) {}
 
-// تابع کمکی محاسبه درصد کنکوری با نمره منفی
 function calculate_konkur_percent($correct, $wrong, $blank) {
     if ($correct === null && $wrong === null && $blank === null) {
         return null;
@@ -62,7 +59,6 @@ function calculate_konkur_percent($correct, $wrong, $blank) {
     return round(max(-33.33, min(100, $raw_percent)), 2);
 }
 
-// تشخیص مشخصات دسته بر اساس رنگ یا دسته‌های سفارشی کاربر
 function resolve_event_category_meta($pdo, $user_id, $color) {
     $defaults = [
         '#4f46e5' => ['type' => 'specialized', 'label' => 'تخصصی',  'is_study' => 1],
@@ -77,7 +73,6 @@ function resolve_event_category_meta($pdo, $user_id, $color) {
         return $defaults[$norm_color];
     }
 
-    // جستجو در دسته‌های سفارشی ساخته شده توسط کاربر
     $stmt = $pdo->prepare("SELECT id, name, is_study FROM calendar_categories WHERE user_id = ? AND LOWER(color) = ? LIMIT 1");
     $stmt->execute([$user_id, $norm_color]);
     $custom = $stmt->fetch();
@@ -95,13 +90,12 @@ function resolve_event_category_meta($pdo, $user_id, $color) {
 
 try {
     // ====================================================
-    // ۱. دریافت لیست رویدادها + دسته‌های سفارشی + آمار تفکیک‌شده (درسی vs متفرقه)
+    // ۱. دریافت لیست رویدادها + دسته‌های سفارشی + آمار + وضعیت اشتراک
     // ====================================================
     if ($action === 'list') {
         $start = $_GET['start'] ?? date('Y-m-d');
         $end   = $_GET['end'] ?? date('Y-m-d');
 
-        // الف) رویدادهای بازه انتخابی
         $stmt = $pdo->prepare("
             SELECT e.*, p.title AS pdf_title 
             FROM calendar_events e
@@ -112,12 +106,10 @@ try {
         $stmt->execute([$user_id, $start, $end]);
         $events = $stmt->fetchAll();
 
-        // ب) دسته‌های سفارشی کاربر
         $catStmt = $pdo->prepare("SELECT id, name, color, is_study FROM calendar_categories WHERE user_id = ? ORDER BY id ASC");
         $catStmt->execute([$user_id]);
         $custom_categories = $catStmt->fetchAll();
 
-        // ج) محاسبه دقیق و تفکیک‌شده ساعات «درسی/مطالعه» از «کارهای متفرقه» در بازه فعلی
         $study_planned_mins   = 0;
         $study_completed_mins = 0;
         $misc_planned_mins    = 0;
@@ -147,7 +139,6 @@ try {
             }
         }
 
-        // د) آمار کل پیشرفت تا کنکور (تفکیک درسی و متفرقه)
         $statStmt = $pdo->prepare("
             SELECT 
                 COUNT(*) AS total_tasks,
@@ -160,28 +151,21 @@ try {
         $statStmt->execute([$user_id]);
         $overall = $statStmt->fetch();
 
-        // ه) شماره موبایل کاربر
-        $uStmt = $pdo->prepare("SELECT phone FROM users WHERE id = ?");
-        $uStmt->execute([$user_id]);
-        $user_row = $uStmt->fetch();
-
         echo json_encode([
             'status'            => 'success',
             'events'            => $events,
             'custom_categories' => $custom_categories,
-            'user_phone'        => $user_row['phone'] ?? '',
+            'user_phone'        => $sub_info['phone'],
+            'subscription'      => $sub_info,
             'stats'             => [
                 'total'                 => (int)($overall['total_tasks'] ?? 0),
                 'completed'             => (int)($overall['completed_tasks'] ?? 0),
                 'study_total'           => (int)($overall['study_total_tasks'] ?? 0),
                 'study_completed'       => (int)($overall['study_completed_tasks'] ?? 0),
-                // آمار درسی (مطالعه خالص)
                 'planned_hours'         => round($study_planned_mins / 60, 1),
                 'completed_hours'       => round($study_completed_mins / 60, 1),
-                // آمار کارهای متفرقه (کاملاً جدا از مطالعه)
                 'misc_planned_hours'    => round($misc_planned_mins / 60, 1),
                 'misc_completed_hours'  => round($misc_completed_mins / 60, 1),
-                // میانگین درصد تست
                 'avg_test_percent'      => $percent_count > 0 ? round($percent_sum / $percent_count, 1) : null
             ]
         ]);
@@ -189,7 +173,7 @@ try {
     }
 
     // ====================================================
-    // ۲. ساخت نوع و رنگ برنامه سفارشی توسط کاربر
+    // ۲. ساخت نوع و رنگ برنامه سفارشی توسط کاربر (رایگان برای همه)
     // ====================================================
     if ($action === 'create_category') {
         $name     = trim($_POST['name'] ?? '');
@@ -236,7 +220,7 @@ try {
     }
 
     // ====================================================
-    // ۴. ثبت یا ویرایش رویداد (پشتیبانی از دسته‌های سفارشی، تکرار و درصد تست)
+    // ۴. ثبت یا ویرایش رویداد (همراه با قفل پیامک برای کاربران عادی)
     // ====================================================
     if ($action === 'save') {
         $id          = !empty($_POST['id']) ? (int)$_POST['id'] : null;
@@ -246,12 +230,13 @@ try {
         $start_time  = $_POST['start_time'] ?? '';
         $end_time    = $_POST['end_time'] ?? '';
         $color       = strtolower(trim($_POST['color'] ?? '#4f46e5'));
-        $send_sms    = isset($_POST['send_sms']) ? (int)$_POST['send_sms'] : 0;
+        $req_sms     = isset($_POST['send_sms']) ? (int)$_POST['send_sms'] : 0;
+        // اگر کاربر اشتراک ویژه ندارد، گزینه پیامک در سمت سرور هم غیرفعال می‌شود
+        $send_sms    = ($sub_info['is_vip'] && $req_sms === 1) ? 1 : 0;
         $pdf_id      = !empty($_POST['pdf_id']) ? (int)$_POST['pdf_id'] : null;
         $pdf_page    = !empty($_POST['pdf_page']) ? max(1, (int)$_POST['pdf_page']) : 1;
         $repeat_mode = $_POST['repeat_mode'] ?? 'none';
 
-        // استخراج خودکار نوع برنامه، برچسب و ماهیت (درسی یا متفرقه)
         $cat_meta       = resolve_event_category_meta($pdo, $user_id, $color);
         $category_type  = $cat_meta['type'];
         $category_label = $cat_meta['label'];
@@ -345,7 +330,7 @@ try {
     }
 
     // ====================================================
-    // ۵. انتقال سریع یک برنامه به روز بعد (Move to Tomorrow)
+    // ۵. انتقال سریع یک برنامه به روز بعد
     // ====================================================
     if ($action === 'move_to_tomorrow') {
         $id = (int)($_POST['id'] ?? 0);
@@ -376,7 +361,7 @@ try {
     }
 
     // ====================================================
-    // ۶. کپی کردن تمام برنامه‌های یک روز به روزی دیگر (Copy Day)
+    // ۶. کپی کردن تمام برنامه‌های یک روز به روزی دیگر
     // ====================================================
     if ($action === 'copy_day') {
         $source_date = $_POST['source_date'] ?? '';
@@ -422,10 +407,11 @@ try {
         ");
 
         foreach ($source_events as $sev) {
+            $copied_sms = ($sub_info['is_vip'] && (int)($sev['send_sms'] ?? 1) === 1) ? 1 : 0;
             $ins->execute([
                 $user_id, $sev['title'], $sev['description'], $target_date, $target_j,
                 $sev['start_time'], $sev['end_time'], $sev['color'], $sev['category_type'],
-                $sev['category_label'] ?? 'تخصصی', $sev['is_study'] ?? 1, $sev['send_sms'] ?? 1,
+                $sev['category_label'] ?? 'تخصصی', $sev['is_study'] ?? 1, $copied_sms,
                 $sev['pdf_id'], $sev['pdf_page']
             ]);
         }
@@ -480,7 +466,7 @@ try {
         $stmt->execute([$phone, $user_id]);
         $_SESSION['phone'] = $phone;
 
-        echo json_encode(['status' => 'success', 'message' => 'شماره موبایل شما برای دریافت پیامک‌های یادآوری ثبت شد.']);
+        echo json_encode(['status' => 'success', 'message' => 'شماره موبایل شما ثبت شد.']);
         exit;
     }
 

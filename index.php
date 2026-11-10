@@ -4,6 +4,14 @@ require_login();
 
 $user_id = (int)$_SESSION['user_id'];
 
+// مقادیر پیش‌فرض ایمن در صورتی که ثوابت در config.php تعریف نشده باشند
+if (!defined('TELEGRAM_SALES_ID'))  define('TELEGRAM_SALES_ID', 'YourTelegramID');
+if (!defined('FREE_MAX_PDF_COUNT')) define('FREE_MAX_PDF_COUNT', 1);
+if (!defined('FREE_MAX_PDF_MB'))    define('FREE_MAX_PDF_MB', 3);
+if (!defined('VIP_MAX_PDF_MB'))     define('VIP_MAX_PDF_MB', 64);
+if (!defined('PLAN_1M_PRICE'))      define('PLAN_1M_PRICE', '۵۰۰,۰۰۰');
+if (!defined('PLAN_3M_PRICE'))      define('PLAN_3M_PRICE', '۱,۲۰۰,۰۰۰');
+
 // ارتقای خودکار جداول دیتابیس (بدون نیاز به اجرای دستی SQL در phpMyAdmin)
 try {
     $pdo->exec("
@@ -19,9 +27,30 @@ try {
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_persian_ci;
     ");
 
+    $pdo->exec("
+        CREATE TABLE IF NOT EXISTS `subscription_codes` (
+          `id` int(11) NOT NULL AUTO_INCREMENT,
+          `code` varchar(32) NOT NULL UNIQUE,
+          `plan_type` varchar(20) NOT NULL,
+          `days` int(11) NOT NULL DEFAULT 30,
+          `is_used` tinyint(1) DEFAULT 0,
+          `used_by` int(11) DEFAULT NULL,
+          `used_at` datetime DEFAULT NULL,
+          `created_at` timestamp DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (`id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_persian_ci;
+    ");
+
     $uCols = $pdo->query("SHOW COLUMNS FROM `users`")->fetchAll(PDO::FETCH_COLUMN);
     if (!in_array('phone', $uCols)) {
         $pdo->exec("ALTER TABLE `users` ADD COLUMN `phone` varchar(15) DEFAULT NULL AFTER `username`");
+    }
+    if (!in_array('is_admin', $uCols)) {
+        $pdo->exec("ALTER TABLE `users` ADD COLUMN `is_admin` tinyint(1) DEFAULT 0 AFTER `password_hash`");
+        $pdo->exec("UPDATE `users` SET `is_admin` = 1 WHERE `id` = 1");
+    }
+    if (!in_array('vip_expires_at', $uCols)) {
+        $pdo->exec("ALTER TABLE `users` ADD COLUMN `vip_expires_at` datetime DEFAULT NULL AFTER `is_admin`");
     }
 
     $eCols = $pdo->query("SHOW COLUMNS FROM `calendar_events`")->fetchAll(PDO::FETCH_COLUMN);
@@ -51,13 +80,28 @@ try {
         ");
     }
 } catch (Exception $ignore) {}
+
+// دریافت وضعیت اشتراک کاربر در لحظه بارگذاری صفحه
+$initial_sub = function_exists('get_user_subscription_info')
+    ? get_user_subscription_info($pdo, $user_id)
+    : [
+        'is_vip'      => false,
+        'is_admin'    => ($user_id === 1),
+        'days_left'   => 0,
+        'expires_j'   => 'ندارد',
+        'max_pdf_mb'  => FREE_MAX_PDF_MB,
+        'max_pdf_cnt' => FREE_MAX_PDF_COUNT,
+        'username'    => $_SESSION['username'] ?? '',
+        'full_name'   => $_SESSION['full_name'] ?? '',
+        'phone'       => $_SESSION['phone'] ?? ''
+    ];
 ?>
 <!DOCTYPE html>
 <html lang="fa" dir="rtl">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>داشبورد هوشمند مطالعه و تقویم کنکور v2.5</title>
+    <title>داشبورد هوشمند مطالعه و تقویم کنکور v3.0</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css" rel="stylesheet">
     
@@ -82,7 +126,6 @@ try {
         }
         .page-flip-anim { animation: pageFadeIn 0.18s ease-out; }
 
-        /* کارت‌های تقویم هنگام هاور روی سایر کارت‌های همپوشان قرار بگیرند */
         .cal-event-card:hover {
             z-index: 35 !important;
             box-shadow: 0 10px 20px -5px rgba(0, 0, 0, 0.35);
@@ -103,13 +146,13 @@ try {
 <body class="bg-slate-100 text-slate-800 h-screen flex flex-col overflow-hidden select-none">
 
     <!-- ==================================================== -->
-    <!-- ۱. هدر اصلی سامانه -->
+    <!-- ۱. هدر اصلی سامانه (شامل نشانگر وضعیت اشتراک و دکمه پنل ادمین) -->
     <!-- ==================================================== -->
     <header id="main-app-header" class="bg-slate-900 text-white px-3 md:px-4 py-2 flex flex-wrap items-center justify-between gap-2 shadow-md z-30 shrink-0">
-        <div class="flex items-center gap-2 md:gap-4">
+        <div class="flex items-center gap-2 md:gap-3">
             <div class="flex items-center gap-1.5">
                 <span class="bg-indigo-600 text-white px-2 py-1 rounded-lg font-extrabold text-xs">🎯 کنکور</span>
-                <span class="font-bold text-xs md:text-sm truncate max-w-[100px] sm:max-w-none"><?php echo htmlspecialchars($_SESSION['full_name']); ?></span>
+                <span class="font-bold text-xs md:text-sm truncate max-w-[90px] sm:max-w-none"><?php echo htmlspecialchars($_SESSION['full_name']); ?></span>
             </div>
 
             <nav class="flex bg-slate-800 p-0.5 rounded-xl border border-slate-700">
@@ -122,18 +165,35 @@ try {
             </nav>
         </div>
 
-        <div class="flex items-center gap-1.5 md:gap-2.5 text-xs">
-            <button type="button" onclick="togglePomodoroWidget()" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-amber-300 px-2.5 py-1.5 rounded-lg font-bold flex items-center gap-1 transition" title="تایمر پومودورو و کرنومتر مطالعه">
+        <div class="flex items-center gap-1.5 md:gap-2 text-xs">
+            <!-- دکمه وضعیت اشتراک (عادی یا ویژه) -->
+            <button type="button" id="header-sub-btn" onclick="openSubscriptionModal()" class="<?php echo $initial_sub['is_vip'] ? 'bg-gradient-to-r from-amber-500 to-yellow-400 text-slate-950' : 'bg-indigo-600 hover:bg-indigo-500 text-white border border-indigo-400'; ?> px-2.5 py-1.5 rounded-lg font-extrabold flex items-center gap-1 shadow-xs transition">
+                <?php if ($initial_sub['is_vip']): ?>
+                    <span>👑 ویژه (<?php echo $initial_sub['days_left']; ?> روز | +تمدید)</span>
+                <?php else: ?>
+                    <span>⭐ ارتقا به اشتراک ویژه</span>
+                <?php endif; ?>
+            </button>
+
+            <!-- دکمه ورود به پنل ادمین (فقط برای مدیر سایت) -->
+            <?php if (!empty($initial_sub['is_admin'])): ?>
+                <a href="admin.php" class="bg-slate-800 hover:bg-slate-700 border border-amber-500/50 text-amber-300 px-2.5 py-1.5 rounded-lg font-bold flex items-center gap-1 transition" title="ورود به پنل مدیریت کاربران و اشتراک‌ها">
+                    <span>🛠️</span>
+                    <span class="hidden lg:inline">مدیریت</span>
+                </a>
+            <?php endif; ?>
+
+            <button type="button" onclick="togglePomodoroWidget()" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-amber-300 px-2 py-1.5 rounded-lg font-bold flex items-center gap-1 transition" title="تایمر پومودورو و کرنومتر مطالعه">
                 <span>⏱️</span>
-                <span id="header-timer-badge" class="hidden sm:inline">تایمر</span>
+                <span id="header-timer-badge" class="hidden xl:inline">تایمر</span>
             </button>
 
-            <button type="button" onclick="openPhoneModal()" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-sky-300 px-2.5 py-1.5 rounded-lg font-bold flex items-center gap-1 transition" title="تنظیمات پیامک یادآوری sms.ir">
+            <button type="button" onclick="openPhoneModal()" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-sky-300 px-2 py-1.5 rounded-lg font-bold flex items-center gap-1 transition" title="تنظیمات پیامک یادآوری sms.ir">
                 <span>📱</span>
-                <span class="hidden md:inline">پیامک</span>
+                <span class="hidden xl:inline">پیامک</span>
             </button>
 
-            <div class="bg-rose-600/20 border border-rose-500/40 text-rose-200 px-2.5 py-1.5 rounded-lg font-bold">
+            <div class="hidden sm:block bg-rose-600/20 border border-rose-500/40 text-rose-200 px-2.5 py-1.5 rounded-lg font-bold">
                 ⏳ <?php echo DAYS_TO_KONKUR; ?> روز تا ۱۶ بهمن
             </div>
 
@@ -182,14 +242,12 @@ try {
             </div>
 
             <div class="flex flex-wrap items-center gap-1.5 md:gap-2">
-                <!-- فیلتر نمایش (همه / فقط درسی / فقط متفرقه) -->
                 <div class="flex bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-[11px]">
                     <button type="button" id="filter-all" onclick="setCalendarFilter('all')" class="px-2 py-1 rounded-md font-bold bg-white shadow-2xs text-slate-800">همه</button>
                     <button type="button" id="filter-study" onclick="setCalendarFilter('study')" class="px-2 py-1 rounded-md font-bold text-slate-600">📚 درسی</button>
                     <button type="button" id="filter-misc" onclick="setCalendarFilter('misc')" class="px-2 py-1 rounded-md font-bold text-slate-600">🧩 متفرقه</button>
                 </div>
 
-                <!-- تغییر نمای هفتگی / روزانه -->
                 <div class="flex bg-slate-100 p-0.5 rounded-lg border border-slate-200">
                     <button type="button" id="btn-view-week" onclick="setViewMode('week')" class="px-2.5 py-1 rounded-md text-xs font-bold bg-white shadow-2xs text-indigo-600">
                         هفتگی
@@ -199,7 +257,6 @@ try {
                     </button>
                 </div>
 
-                <!-- دکمه کپی برنامه‌های یک روز به روز دیگر -->
                 <button type="button" onclick="openCopyDayModal()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-2.5 py-1.5 rounded-lg text-xs font-bold transition" title="کپی کردن برنامه‌های یک روز به روزی دیگر">
                     📋 <span class="hidden sm:inline">کپی روز</span>
                 </button>
@@ -210,10 +267,8 @@ try {
             </div>
         </div>
 
-        <!-- نوار افقی ۷ روز هفته مخصوص موبایل و نمای روزانه -->
         <div id="mobile-week-strip" class="hidden bg-slate-50 border-b border-slate-200 px-2 py-1.5 grid-cols-7 gap-1 shrink-0"></div>
 
-        <!-- جدول ساعتی تقویم -->
         <div class="flex-1 flex flex-col overflow-hidden bg-white">
             <div class="flex border-b border-slate-200 bg-slate-50 shrink-0 pr-12 md:pr-14" id="calendar-days-header"></div>
 
@@ -236,7 +291,7 @@ try {
                 <h3 class="font-extrabold text-xs md:text-sm text-slate-800">📚 پوشه‌ها و جزوات من</h3>
                 <div class="flex items-center gap-1">
                     <button type="button" onclick="openFolderModal()" class="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 px-2 py-1.5 rounded-lg text-[11px] font-bold transition">
-                        📁+ پوشه جدید
+                        📁+ پوشه
                     </button>
                     <button type="button" onclick="openUploadModal('')" class="bg-indigo-600 hover:bg-indigo-700 text-white px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition">
                         + آپلود PDF
@@ -245,8 +300,9 @@ try {
                 </div>
             </div>
 
-            <div class="bg-slate-100 px-3 py-1.5 text-[11px] text-slate-500 border-b border-slate-200 flex items-center justify-between">
-                <span>برای باز/بسته شدن هر پوشه روی نام آن بزنید</span>
+            <!-- بنر وضعیت سهمیه آپلود PDF (عادی در برابر ویژه) -->
+            <div id="pdf-quota-banner" class="px-3 py-2 text-[11px] border-b border-slate-200 flex items-center justify-between bg-amber-50 text-amber-900">
+                <!-- توسط جاوااسکریپت بروزرسانی می‌شود -->
             </div>
 
             <div id="pdf-list-container" class="flex-1 overflow-y-auto p-2.5 space-y-2.5 calendar-scroll bg-slate-50/60"></div>
@@ -380,7 +436,7 @@ try {
     </section>
 
     <!-- ==================================================== -->
-    <!-- ۴. ویجت شناور تایمر پومودورو (با قابلیت اتصال مستقیم به برنامه تقویم) -->
+    <!-- ۴. ویجت شناور تایمر پومودورو -->
     <!-- ==================================================== -->
     <div id="pomodoro-widget" class="hidden fixed top-14 left-4 z-50 bg-slate-900 text-white rounded-2xl shadow-2xl border border-slate-700 w-68 p-3.5 text-xs">
         <div class="flex items-center justify-between border-b border-slate-800 pb-2 mb-2">
@@ -388,7 +444,6 @@ try {
             <button type="button" onclick="togglePomodoroWidget()" class="text-slate-400 hover:text-white text-base">&times;</button>
         </div>
 
-        <!-- نام برنامه متصل شده از تقویم -->
         <div id="pomodoro-linked-task-box" class="hidden bg-indigo-950/80 border border-indigo-700/60 rounded-xl p-2 mb-2.5">
             <div class="text-[10px] text-indigo-300 mb-0.5">در حال مطالعه برنامه:</div>
             <div id="pomodoro-linked-title" class="font-extrabold text-white truncate"></div>
@@ -416,7 +471,7 @@ try {
     </div>
 
     <!-- ==================================================== -->
-    <!-- ۵. مودال ثبت و ویرایش برنامه تقویم (همراه با ساخت نوع و رنگ دلخواه) -->
+    <!-- ۵. مودال ثبت و ویرایش برنامه تقویم (با قفل پیامک برای کاربران عادی) -->
     <!-- ==================================================== -->
     <div id="event-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs hidden items-end sm:items-center justify-center sm:p-4 z-50">
         <div class="bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-lg max-h-[94vh] flex flex-col overflow-hidden">
@@ -448,10 +503,8 @@ try {
                     </div>
                 </div>
 
-                <!-- هشدار زنده همپوشانی زمانی -->
                 <div id="overlap-warning-box" class="hidden bg-amber-50 border border-amber-300 text-amber-900 px-3 py-2 rounded-xl text-[11px] font-bold"></div>
 
-                <!-- انتخاب نوع و رنگ برنامه (۵ دسته اصلی + دسته‌های سفارشی کاربر + فرم افزودن نوع جدید) -->
                 <div class="space-y-2">
                     <div class="flex items-center justify-between">
                         <label class="font-bold text-slate-700">نوع و رنگ برنامه</label>
@@ -460,12 +513,8 @@ try {
                         </button>
                     </div>
 
-                    <!-- لیست رادیویی دسته‌ها (اصلی + سفارشی کاربر) -->
-                    <div id="event-categories-grid" class="grid grid-cols-3 sm:grid-cols-4 gap-1.5">
-                        <!-- توسط جاوااسکریپت رندر می‌شود -->
-                    </div>
+                    <div id="event-categories-grid" class="grid grid-cols-3 sm:grid-cols-4 gap-1.5"></div>
 
-                    <!-- باکس بازشوی ساخت نوع و رنگ سفارشی (به‌جز ۵ رنگ اصلی) -->
                     <div id="new-category-box" class="hidden bg-slate-100 p-3 rounded-xl border border-slate-300 space-y-2.5">
                         <div class="flex items-center justify-between">
                             <span class="font-extrabold text-slate-800 text-[11px]">افزودن نوع برنامه سفارشی</span>
@@ -480,9 +529,7 @@ try {
                         </div>
                         <div>
                             <span class="block text-[10px] font-bold text-slate-600 mb-1">انتخاب رنگ اختصاصی (متمایز از ۵ رنگ اصلی):</span>
-                            <div id="custom-color-palette" class="flex flex-wrap items-center gap-2">
-                                <!-- پالت ۱۰ رنگ غیر اصلی توسط JS ساخته می‌شود -->
-                            </div>
+                            <div id="custom-color-palette" class="flex flex-wrap items-center gap-2"></div>
                         </div>
                         <div class="flex justify-end">
                             <button type="button" onclick="saveNewCustomCategory()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-1.5 rounded-lg font-bold text-[11px]">
@@ -492,7 +539,7 @@ try {
                     </div>
                 </div>
 
-                <!-- تکرار روتین در طول هفته + تنظیم پیامک یادآوری sms.ir -->
+                <!-- تکرار روتین + پیامک یادآوری (قفل برای کاربران عادی) -->
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 bg-slate-50 p-2.5 rounded-xl border border-slate-200">
                     <div id="repeat-mode-wrapper">
                         <label class="block font-bold text-slate-700 mb-1">🔁 تکرار روتین در این هفته</label>
@@ -503,14 +550,14 @@ try {
                         </select>
                     </div>
                     <div class="flex items-center pt-2 sm:pt-4">
-                        <label class="flex items-center gap-2 cursor-pointer select-none">
-                            <input type="checkbox" id="ev-send-sms" name="send_sms" value="1" checked class="w-4 h-4 accent-indigo-600 rounded">
-                            <span class="text-slate-700 font-bold text-[11px]">📱 ارسال پیامک در صورت عدم انجام</span>
+                        <label onclick="handleSmsCheckboxClick(event)" class="flex items-center gap-1.5 cursor-pointer select-none">
+                            <input type="checkbox" id="ev-send-sms" name="send_sms" value="1" class="w-4 h-4 accent-indigo-600 rounded">
+                            <span class="text-slate-700 font-bold text-[11px]">📱 پیامک یادآوری عدم انجام</span>
+                            <span id="sms-vip-lock-badge" class="hidden bg-amber-100 text-amber-800 border border-amber-300 px-1.5 py-0.5 rounded text-[9px] font-extrabold">🔒 ویژه</span>
                         </label>
                     </div>
                 </div>
 
-                <!-- اتصال مستقیم به جزوه PDF -->
                 <div class="bg-indigo-50/70 p-2.5 rounded-xl border border-indigo-100 space-y-2">
                     <label class="block font-bold text-indigo-900">📎 اتصال به جزوه PDF و شماره صفحه (اختیاری)</label>
                     <div class="grid grid-cols-3 gap-2">
@@ -528,7 +575,6 @@ try {
                     </button>
                 </div>
 
-                <!-- ثبت آمار تست و محاسبه خودکار درصد کنکوری -->
                 <div class="bg-amber-50/70 p-2.5 rounded-xl border border-amber-200/80 space-y-2">
                     <div class="flex items-center justify-between">
                         <label class="font-bold text-amber-900">📊 ثبت عملکرد تست‌زنی (محاسبه با نمره منفی)</label>
@@ -552,7 +598,6 @@ try {
                     <textarea id="ev-desc" name="description" rows="2" placeholder="شماره تست‌ها یا نکات..." class="w-full px-3 py-1.5 border border-slate-300 rounded-lg"></textarea>
                 </div>
 
-                <!-- نوار ابزارهای عملیاتی ویژه برنامه موجود (انتقال به فردا + شروع تایمر پومودورو) -->
                 <div id="edit-extra-actions" class="hidden grid grid-cols-2 gap-2 pt-1">
                     <button type="button" onclick="moveCurrentEventToTomorrow()" class="py-1.5 px-2 bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 rounded-lg font-bold text-[11px] flex items-center justify-center gap-1">
                         <span>⏭️ انتقال برنامه به فردا</span>
@@ -586,7 +631,134 @@ try {
     </div>
 
     <!-- ==================================================== -->
-    <!-- ۶. مودال کپی کردن برنامه‌های یک روز به روزی دیگر -->
+    <!-- ۶. مودال خرید و تمدید اشتراک ویژه (VIP) + ارجاع هوشمند به تلگرام -->
+    <!-- ==================================================== -->
+    <div id="subscription-modal" class="fixed inset-0 bg-slate-900/75 backdrop-blur-xs hidden items-end sm:items-center justify-center sm:p-4 z-50">
+        <div class="bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-2xl max-h-[94vh] flex flex-col overflow-hidden">
+            <!-- هدر طلایی/سرمه‌ای اشتراک -->
+            <div class="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white px-5 py-4 flex items-center justify-between shrink-0">
+                <div class="flex items-center gap-2.5">
+                    <span class="text-2xl">👑</span>
+                    <div>
+                        <h3 class="font-extrabold text-sm md:text-base text-amber-300">اشتراک ویژه (VIP) سامانه مطالعه و تقویم کنکور</h3>
+                        <p id="sub-modal-current-status" class="text-[11px] text-slate-300 mt-0.5"></p>
+                    </div>
+                </div>
+                <button type="button" onclick="closeSubscriptionModal()" class="text-slate-400 hover:text-white text-2xl leading-none">&times;</button>
+            </div>
+
+            <div class="p-4 sm:p-5 overflow-y-auto calendar-scroll space-y-4 text-xs">
+                
+                <!-- پیام هشدار در صورتی که کاربر به خاطر محدودیت ۳ مگابایت یا ۱ فایل یا پیامک به این پنجره هدایت شده باشد -->
+                <div id="sub-modal-reason-alert" class="hidden bg-rose-50 border border-rose-200 text-rose-800 px-3.5 py-2.5 rounded-xl font-bold leading-relaxed"></div>
+
+                <!-- مقایسه امکانات کاربر عادی و کاربر ویژه -->
+                <div class="bg-slate-50 rounded-2xl p-3.5 border border-slate-200">
+                    <h4 class="font-extrabold text-slate-800 mb-2.5 text-xs">✨ با تهیه اشتراک ویژه چه امکاناتی برای شما باز می‌شود؟</h4>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        <div class="bg-white p-2.5 rounded-xl border border-slate-200 flex items-start gap-2">
+                            <span class="text-base">📚</span>
+                            <div>
+                                <div class="font-extrabold text-slate-800">آپلود نامحدود جزوات و کتاب‌ها</div>
+                                <div class="text-[11px] text-slate-500 mt-0.5">بدون محدودیت ۱ فایل! تمام کتاب‌ها و جزوات هر درس را در پوشه‌های مجزا ذخیره کنید.</div>
+                            </div>
+                        </div>
+                        <div class="bg-white p-2.5 rounded-xl border border-slate-200 flex items-start gap-2">
+                            <span class="text-base">🚀</span>
+                            <div>
+                                <div class="font-extrabold text-slate-800">حجم هر فایل تا <?php echo VIP_MAX_PDF_MB; ?> مگابایت</div>
+                                <div class="text-[11px] text-slate-500 mt-0.5">حذف محدودیت ۳ مگابایت کاربر عادی و امکان آپلود PDFهای سنگین و اسکن‌شده.</div>
+                            </div>
+                        </div>
+                        <div class="bg-white p-2.5 rounded-xl border border-slate-200 flex items-start gap-2">
+                            <span class="text-base">📱</span>
+                            <div>
+                                <div class="font-extrabold text-slate-800">پیامک هوشمند پیگیری برنامه (sms.ir)</div>
+                                <div class="text-[11px] text-slate-500 mt-0.5">ارسال خودکار پیامک خدماتی در صورت گذشتن زمان برنامه و تیک نخوردن آن در تقویم.</div>
+                            </div>
+                        </div>
+                        <div class="bg-white p-2.5 rounded-xl border border-slate-200 flex items-start gap-2">
+                            <span class="text-base">🔄</span>
+                            <div>
+                                <div class="font-extrabold text-slate-800">قابلیت تمدید زودهنگام تجمعی</div>
+                                <div class="text-[11px] text-slate-500 mt-0.5">در صورت تمدید قبل از اتمام اشتراک، روزهای جدید دقیقاً به ادامه اعتبار قبلی شما اضافه می‌شود.</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- کارت‌های انتخاب پلن ۱ ماهه و ۳ ماهه -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                    
+                    <!-- پلن ۱ ماهه -->
+                    <div class="border-2 border-slate-200 hover:border-indigo-500 rounded-2xl p-4 flex flex-col justify-between bg-white transition">
+                        <div>
+                            <div class="flex items-center justify-between mb-2">
+                                <span class="font-extrabold text-sm text-slate-800">💎 اشتراک ۱ ماهه</span>
+                                <span class="bg-slate-100 text-slate-600 px-2 py-0.5 rounded-md text-[10px] font-bold">۳۰ روز کامل</span>
+                            </div>
+                            <div class="my-3">
+                                <span class="text-2xl font-black text-indigo-600"><?php echo PLAN_1M_PRICE; ?></span>
+                                <span class="text-slate-500 font-bold">تومان</span>
+                            </div>
+                            <ul class="space-y-1.5 text-[11px] text-slate-600 mb-4">
+                                <li>✓ آپلود نامحدود فایل PDF (تا <?php echo VIP_MAX_PDF_MB; ?> مگابایت)</li>
+                                <li>✓ فعال‌سازی پنل پیامک یادآوری تقویم</li>
+                                <li>✓ قابلیت تمدید قبل از اتمام مهلت</li>
+                            </ul>
+                        </div>
+                        <a id="tg-link-1m" href="#" target="_blank" class="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-extrabold text-center shadow-sm transition flex items-center justify-center gap-1.5">
+                            <span>✈️ سفارش ۱ ماهه در تلگرام</span>
+                        </a>
+                    </div>
+
+                    <!-- پلن ۳ ماهه (پیشنهاد ویژه) -->
+                    <div class="border-2 border-emerald-500 rounded-2xl p-4 flex flex-col justify-between bg-emerald-50/30 relative shadow-md">
+                        <span class="absolute -top-2.5 left-4 bg-emerald-600 text-white text-[10px] font-extrabold px-2.5 py-0.5 rounded-full shadow">
+                            🔥 ۳۰۰,۰۰۰ تومان تخفیف ویژه
+                        </span>
+                        <div>
+                            <div class="flex items-center justify-between mb-2">
+                                <span class="font-extrabold text-sm text-emerald-950">👑 اشتراک ۳ ماهه</span>
+                                <span class="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-md text-[10px] font-bold">۹۰ روز کامل</span>
+                            </div>
+                            <div class="my-3 flex items-baseline gap-2">
+                                <span class="text-2xl font-black text-emerald-600"><?php echo PLAN_3M_PRICE; ?></span>
+                                <span class="text-slate-500 font-bold">تومان</span>
+                                <span class="text-slate-400 line-through text-[11px]">۱,۵۰۰,۰۰۰</span>
+                            </div>
+                            <ul class="space-y-1.5 text-[11px] text-slate-700 mb-4">
+                                <li>✓ <b>۲۰٪ به‌صرفه‌تر</b> (ماهیانه فقط ۴۰۰ هزار تومان)</li>
+                                <li>✓ آپلود نامحدود فایل PDF + تمام پوشه‌ها</li>
+                                <li>✓ پیامک یادآوری بدون محدودیت تا روز کنکور</li>
+                            </ul>
+                        </div>
+                        <a id="tg-link-3m" href="#" target="_blank" class="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-extrabold text-center shadow-sm transition flex items-center justify-center gap-1.5">
+                            <span>✈️ سفارش ۳ ماهه در تلگرام</span>
+                        </a>
+                    </div>
+                </div>
+
+                <!-- بخش ورود کد فعال‌سازی آنی -->
+                <div class="bg-slate-900 text-white p-3.5 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-3">
+                    <div class="text-center sm:text-right">
+                        <div class="font-extrabold text-amber-300 text-xs">🎟️ کد فعال‌سازی اشتراک دریافت کرده‌اید؟</div>
+                        <div class="text-[11px] text-slate-300 mt-0.5">کدی که پشتیبانی در تلگرام برایتان ارسال کرده را وارد کنید تا درجا فعال شود:</div>
+                    </div>
+                    <form onsubmit="handleRedeemCode(event)" class="flex items-center gap-1.5 w-full sm:w-auto">
+                        <input type="text" id="redeem-code-input" required dir="ltr" placeholder="VIP90-XXXX-XXXX" class="flex-1 sm:w-44 px-3 py-2 rounded-xl bg-slate-800 border border-slate-600 text-white font-mono text-center font-bold focus:outline-none focus:border-amber-400">
+                        <button type="submit" id="btn-redeem-submit" class="bg-amber-400 hover:bg-amber-300 text-slate-950 font-black px-3.5 py-2 rounded-xl shrink-0 transition">
+                            فعال‌سازی
+                        </button>
+                    </form>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================================================== -->
+    <!-- ۷. مودال کپی کردن برنامه‌های یک روز به روزی دیگر -->
     <!-- ==================================================== -->
     <div id="copy-day-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs hidden items-center justify-center p-4 z-50">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
@@ -616,7 +788,7 @@ try {
     </div>
 
     <!-- ==================================================== -->
-    <!-- ۷. مودال ساخت پوشه درسی جدید -->
+    <!-- ۸. مودال ساخت پوشه درسی جدید -->
     <!-- ==================================================== -->
     <div id="folder-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs hidden items-center justify-center p-4 z-50">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
@@ -645,7 +817,7 @@ try {
     </div>
 
     <!-- ==================================================== -->
-    <!-- ۸. مودال انتقال جزوه به پوشه دیگر -->
+    <!-- ۹. مودال انتقال جزوه به پوشه دیگر -->
     <!-- ==================================================== -->
     <div id="move-pdf-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs hidden items-center justify-center p-4 z-50">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
@@ -670,7 +842,7 @@ try {
     </div>
 
     <!-- ==================================================== -->
-    <!-- ۹. مودال آپلود جزوه PDF -->
+    <!-- ۱۰. مودال آپلود جزوه PDF (با نمایش سقف حجم مجاز کاربر) -->
     <!-- ==================================================== -->
     <div id="upload-pdf-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs hidden items-center justify-center p-4 z-50">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
@@ -679,6 +851,7 @@ try {
                 <button type="button" onclick="closeUploadModal()" class="text-slate-400 hover:text-white text-xl leading-none">&times;</button>
             </div>
             <form id="upload-pdf-form" onsubmit="handlePdfUpload(event)" class="p-4 space-y-3.5 text-xs">
+                <div id="upload-modal-tier-hint" class="p-2.5 rounded-xl bg-slate-100 text-slate-700 text-[11px] font-bold"></div>
                 <div>
                     <label class="block font-bold text-slate-700 mb-1">عنوان جزوه *</label>
                     <input type="text" name="title" required placeholder="مثلاً: جزوه جمع‌بندی فصل ۳ زیست" class="w-full px-3 py-2 border border-slate-300 rounded-lg">
@@ -691,7 +864,7 @@ try {
                 </div>
                 <div>
                     <label class="block font-bold text-slate-700 mb-1">فایل PDF *</label>
-                    <input type="file" name="pdf_file" accept="application/pdf" required class="w-full border border-slate-300 rounded-lg p-2 bg-slate-50">
+                    <input type="file" id="upload-pdf-file-input" name="pdf_file" accept="application/pdf" required class="w-full border border-slate-300 rounded-lg p-2 bg-slate-50">
                 </div>
                 <div class="flex justify-end gap-2 pt-2 border-t">
                     <button type="button" onclick="closeUploadModal()" class="px-3.5 py-2 bg-slate-100 rounded-lg font-bold">انصراف</button>
@@ -702,7 +875,7 @@ try {
     </div>
 
     <!-- ==================================================== -->
-    <!-- ۱۰. مودال نمایش صفحات ستاره‌دار جزوه فعال -->
+    <!-- ۱۱. مودال نمایش صفحات ستاره‌دار جزوه فعال -->
     <!-- ==================================================== -->
     <div id="starred-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs hidden items-center justify-center p-4 z-50">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
@@ -715,7 +888,7 @@ try {
     </div>
 
     <!-- ==================================================== -->
-    <!-- ۱۱. مودال تنظیمات شماره موبایل و پیامک یادآوری sms.ir -->
+    <!-- ۱۲. مودال تنظیمات شماره موبایل و پیامک یادآوری sms.ir -->
     <!-- ==================================================== -->
     <div id="phone-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs hidden items-center justify-center p-4 z-50">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
@@ -724,6 +897,10 @@ try {
                 <button type="button" onclick="closePhoneModal()" class="text-slate-400 hover:text-white text-xl leading-none">&times;</button>
             </div>
             <form onsubmit="handleUpdatePhone(event)" class="p-4 space-y-3.5 text-xs">
+                <div id="phone-modal-vip-notice" class="hidden bg-amber-50 border border-amber-300 text-amber-900 p-2.5 rounded-xl text-[11px] font-bold leading-relaxed">
+                    🔒 ارسال خودکار پیامک یادآوری مخصوص مشترکین ویژه است.
+                    <button type="button" onclick="closePhoneModal(); openSubscriptionModal('برای فعال‌سازی ارسال خودکار پیامک یادآوری، اشتراک ویژه تهیه کنید.');" class="text-indigo-600 underline mr-1 font-extrabold">مشاهده پلن‌های اشتراک</button>
+                </div>
                 <p class="text-slate-600 leading-relaxed">
                     اگر زمان پایان یک برنامه بگذرد و تیک انجام آن را نزده باشید، سیستم به صورت خودکار از طریق خط خدماتی <b>sms.ir</b> به شماره زیر پیامک یادآوری می‌فرستد:
                 </p>
@@ -802,18 +979,23 @@ try {
         }
 
         // ====================================================
-        // متغیرهای پایه، دسته‌های اصلی/سفارشی و تبدیل تاریخ شمسی
+        // متغیرهای پایه، وضعیت اشتراک کاربر و تنظیمات فروش تلگرام
         // ====================================================
-        const TODAY_GREGORIAN  = "<?php echo date('Y-m-d'); ?>";
-        const KONKUR_GREGORIAN = "<?php echo KONKUR_GREGORIAN_DATE; ?>";
+        const TODAY_GREGORIAN   = "<?php echo date('Y-m-d'); ?>";
+        const KONKUR_GREGORIAN  = "<?php echo KONKUR_GREGORIAN_DATE; ?>";
+        const TELEGRAM_SALES_ID = "<?php echo htmlspecialchars(TELEGRAM_SALES_ID); ?>";
+        const FREE_MAX_PDF_CNT  = <?php echo (int)FREE_MAX_PDF_COUNT; ?>;
+        const FREE_MAX_PDF_MB   = <?php echo (int)FREE_MAX_PDF_MB; ?>;
+        const VIP_MAX_PDF_MB    = <?php echo (int)VIP_MAX_PDF_MB; ?>;
+
+        let userSub = <?php echo json_encode($initial_sub, JSON_UNESCAPED_UNICODE); ?>;
 
         let viewMode = window.innerWidth < 768 ? 'day' : 'week';
-        let calendarFilter = 'all'; // 'all', 'study', 'misc'
+        let calendarFilter = 'all';
         let anchorDate = new Date(TODAY_GREGORIAN + 'T00:00:00');
         let loadedEvents = [];
         let customCategories = [];
 
-        // ۵ دسته و رنگ اصلی رزرو شده سیستم
         const DEFAULT_CATEGORIES = [
             { id: 'def_1', name: 'تخصصی',  color: '#4f46e5', is_study: 1, isDefault: true },
             { id: 'def_2', name: 'مرور',   color: '#059669', is_study: 1, isDefault: true },
@@ -822,7 +1004,6 @@ try {
             { id: 'def_5', name: 'متفرقه', color: '#7c3aed', is_study: 0, isDefault: true }
         ];
 
-        // پالت ۱۰ رنگ مجزا برای دسته‌های سفارشی کاربر (بدون تداخل با ۵ رنگ اصلی بالا)
         const CUSTOM_ALLOWED_COLORS = [
             { hex: '#0891b2', title: 'فیروزه‌ای' },
             { hex: '#db2777', title: 'سرخابی' },
@@ -840,6 +1021,145 @@ try {
         const JALALI_MONTHS = ['فروردین','اردیبهشت','خرداد','تیر','مرداد','شهریور','مهر','آبان','آذر','دی','بهمن','اسفند'];
         const WEEKDAY_NAMES = ['شنبه','یکشنبه','دوشنبه','سه‌شنبه','چهارشنبه','پنج‌شنبه','جمعه'];
 
+        // ====================================================
+        // مدیریت رابط کاربری اشتراک ویژه، لینک هوشمند تلگرام و کد فعال‌سازی
+        // ====================================================
+        function refreshSubscriptionUI() {
+            const headerBtn = document.getElementById('header-sub-btn');
+            if (headerBtn) {
+                if (userSub.is_vip) {
+                    headerBtn.className = 'bg-gradient-to-r from-amber-500 to-yellow-400 text-slate-950 px-2.5 py-1.5 rounded-lg font-extrabold flex items-center gap-1 shadow-xs transition';
+                    headerBtn.innerHTML = `<span>👑 ویژه (${userSub.days_left} روز | +تمدید)</span>`;
+                } else {
+                    headerBtn.className = 'bg-indigo-600 hover:bg-indigo-500 text-white border border-indigo-400 px-2.5 py-1.5 rounded-lg font-extrabold flex items-center gap-1 shadow-xs transition';
+                    headerBtn.innerHTML = `<span>⭐ ارتقا به اشتراک ویژه</span>`;
+                }
+            }
+
+            // بنر بالای سایدبار PDF
+            const quotaBanner = document.getElementById('pdf-quota-banner');
+            if (quotaBanner) {
+                if (userSub.is_vip) {
+                    quotaBanner.className = 'px-3 py-2 text-[11px] border-b border-emerald-200 flex items-center justify-between bg-emerald-50 text-emerald-900 font-bold';
+                    quotaBanner.innerHTML = `
+                        <span>👑 اشتراک ویژه فعال (${userSub.days_left} روز مانده)</span>
+                        <button type="button" onclick="openSubscriptionModal()" class="text-indigo-700 underline font-extrabold">+ تمدید</button>
+                    `;
+                } else {
+                    quotaBanner.className = 'px-3 py-2 text-[11px] border-b border-amber-200 flex items-center justify-between bg-amber-50 text-amber-900 font-bold';
+                    quotaBanner.innerHTML = `
+                        <span>👤 سهمیه عادی: ${pdfList.length} از ${FREE_MAX_PDF_CNT} فایل (سقف ${FREE_MAX_PDF_MB}MB)</span>
+                        <button type="button" onclick="openSubscriptionModal()" class="bg-indigo-600 text-white px-2 py-0.5 rounded-md font-extrabold text-[10px]">ارتقا 👑</button>
+                    `;
+                }
+            }
+
+            // نشان قفل کنار تیک پیامک در مودال تقویم
+            const smsLockBadge = document.getElementById('sms-vip-lock-badge');
+            const smsCheckbox  = document.getElementById('ev-send-sms');
+            if (smsLockBadge && smsCheckbox) {
+                if (userSub.is_vip) {
+                    smsLockBadge.classList.add('hidden');
+                } else {
+                    smsLockBadge.classList.remove('hidden');
+                    smsCheckbox.checked = false;
+                }
+            }
+
+            // بنر داخل مودال تنظیمات شماره موبایل
+            const phoneVipNotice = document.getElementById('phone-modal-vip-notice');
+            if (phoneVipNotice) {
+                if (userSub.is_vip) phoneVipNotice.classList.add('hidden');
+                else phoneVipNotice.classList.remove('hidden');
+            }
+        }
+
+        function openSubscriptionModal(reasonMessage = '') {
+            refreshSubscriptionUI();
+
+            const statusEl = document.getElementById('sub-modal-current-status');
+            if (userSub.is_vip) {
+                statusEl.innerHTML = `وضعیت فعلی شما: <b class="text-emerald-300">مشترک ویژه فعال (${userSub.days_left} روز باقی‌مانده - تا ${userSub.expires_j})</b> — با خرید مجدد، روزها به اعتبار فعلی شما اضافه می‌شوند.`;
+            } else {
+                statusEl.innerHTML = `وضعیت فعلی شما: <b class="text-amber-200">کاربر عادی (رایگان)</b> — حداکثر ۱ فایل PDF تا سقف ۳ مگابایت و بدون پیامک یادآوری.`;
+            }
+
+            const reasonBox = document.getElementById('sub-modal-reason-alert');
+            if (reasonMessage) {
+                reasonBox.textContent = '⚠️ ' + reasonMessage;
+                reasonBox.classList.remove('hidden');
+            } else {
+                reasonBox.classList.add('hidden');
+            }
+
+            // ساخت لینک‌های هوشمند تلگرام با متن آماده خودکار
+            const actionType = userSub.is_vip ? 'تمدید اشتراک' : 'خرید اشتراک';
+            const uName      = userSub.full_name || '';
+            const uId        = userSub.username || '';
+            const uPhone     = userSub.phone || document.getElementById('user-phone-input')?.value || 'ثبت‌نشده';
+
+            const msg1m = `سلام وقت بخیر، درخواست ${actionType} ویژه ۱ ماهه (۵۰۰,۰۰۰ تومان) را دارم.\n👤 نام: ${uName}\n🆔 نام کاربری در سایت: ${uId}\n📱 موبایل: ${uPhone}`;
+            const msg3m = `سلام وقت بخیر، درخواست ${actionType} ویژه ۳ ماهه (۱,۲۰۰,۰۰۰ تومان - با تخفیف) را دارم.\n👤 نام: ${uName}\n🆔 نام کاربری در سایت: ${uId}\n📱 موبایل: ${uPhone}`;
+
+            document.getElementById('tg-link-1m').href = `https://t.me/${TELEGRAM_SALES_ID}?text=${encodeURIComponent(msg1m)}`;
+            document.getElementById('tg-link-3m').href = `https://t.me/${TELEGRAM_SALES_ID}?text=${encodeURIComponent(msg3m)}`;
+
+            const m = document.getElementById('subscription-modal');
+            m.classList.remove('hidden');
+            m.classList.add('flex');
+        }
+
+        function closeSubscriptionModal() {
+            const m = document.getElementById('subscription-modal');
+            m.classList.add('hidden');
+            m.classList.remove('flex');
+        }
+
+        async function handleRedeemCode(e) {
+            e.preventDefault();
+            const codeInput = document.getElementById('redeem-code-input');
+            const btn = document.getElementById('btn-redeem-submit');
+            const code = codeInput.value.trim();
+            if (!code) return;
+
+            btn.disabled = true;
+            btn.textContent = '...';
+
+            try {
+                const fd = new FormData();
+                fd.append('action', 'redeem_code');
+                fd.append('code', code);
+
+                const res = await fetch('api_subscription.php', { method: 'POST', body: fd });
+                const data = await res.json();
+                alert(data.message);
+
+                if (data.status === 'success') {
+                    userSub = data.subscription;
+                    codeInput.value = '';
+                    refreshSubscriptionUI();
+                    closeSubscriptionModal();
+                    fetchUserPdfs();
+                }
+            } catch (err) {
+                alert('خطا در ارتباط با سرور.');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'فعال‌سازی';
+            }
+        }
+
+        function handleSmsCheckboxClick(e) {
+            if (!userSub.is_vip) {
+                e.preventDefault();
+                document.getElementById('ev-send-sms').checked = false;
+                openSubscriptionModal('قابلیت ارسال پیامک یادآوری خودکار (از طریق sms.ir) مخصوص کاربران دارای اشتراک ویژه است.');
+            }
+        }
+
+        // ====================================================
+        // توابع تاریخ شمسی و تقویم
+        // ====================================================
         function gregorianToJalali(gy, gm, gd) {
             const g_d_m = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334];
             const gy2 = (gm > 2) ? (gy + 1) : gy;
@@ -999,7 +1319,7 @@ try {
         }
 
         // ====================================================
-        // رندر تقویم + خلاصه ساعت مطالعه روزانه + الگوریتم چیدمان کنار هم (Side-by-Side)
+        // رندر تقویم + چیدمان کنار هم (Side-by-Side)
         // ====================================================
         async function renderCalendar() {
             const days = computeVisibleDays();
@@ -1042,7 +1362,6 @@ try {
                 ? `${firstJ.dayName} ${firstJ.jd} ${firstJ.monthName} ${firstJ.jy}`
                 : `${firstJ.jd} ${firstJ.monthName} تا ${lastJ.jd} ${lastJ.monthName}`;
 
-            // پر کردن دراپ‌داون‌های تاریخ در مودال ثبت برنامه و مودال کپی روز
             const selectDateEl = document.getElementById('ev-date');
             const copySrcEl    = document.getElementById('copy-source-date');
             const copyDstEl    = document.getElementById('copy-target-date');
@@ -1067,6 +1386,10 @@ try {
                 if (data.status === 'success') {
                     loadedEvents = data.events || [];
                     customCategories = data.custom_categories || [];
+                    if (data.subscription) {
+                        userSub = data.subscription;
+                        refreshSubscriptionUI();
+                    }
                     if (data.user_phone) {
                         document.getElementById('user-phone-input').value = data.user_phone;
                     }
@@ -1076,7 +1399,6 @@ try {
                 console.error('Calendar fetch error:', err);
             }
 
-            // ساخت هدر روزها (به همراه خلاصه ساعات مطالعه هر روز) و ستون‌های ساعتی
             let headerHtml = '';
             let gridHtml   = '';
 
@@ -1087,7 +1409,6 @@ try {
                 const isKonkurDay = (gStr === KONKUR_GREGORIAN);
                 const isLocked = (gStr > KONKUR_GREGORIAN);
 
-                // محاسبه ساعات درسی برنامه‌ریزی شده و انجام‌شده برای همین روز خاص
                 const dayStudyEvents = loadedEvents.filter(e => e.g_date === gStr && isEventStudyType(e));
                 let dayPlannedMins = 0;
                 let dayDoneMins = 0;
@@ -1151,9 +1472,6 @@ try {
             drawCurrentTimeIndicator();
         }
 
-        // ====================================================
-        // الگوریتم چیدمان کنار هم (Side-by-Side Collision Clustering) برای تسک‌های همپوشان
-        // ====================================================
         function computeSideBySideLayout(dayEvents) {
             const items = dayEvents.map(ev => {
                 const [sh, sm] = ev.start_time.split(':').map(Number);
@@ -1163,10 +1481,8 @@ try {
                 return { ev, startMins, endMins, colIdx: 0, totalCols: 1 };
             });
 
-            // مرتب‌سازی بر اساس زمان شروع، و در صورت برابری، بازه طولانی‌تر اول
             items.sort((a, b) => (a.startMins - b.startMins) || (b.endMins - a.endMins));
 
-            // گروه‌بندی رویدادهای متداخل در خوشه‌های مستقل (Clusters)
             let clusters = [];
             let currentCluster = [];
             let clusterMaxEnd = -1;
@@ -1186,7 +1502,6 @@ try {
             });
             if (currentCluster.length > 0) clusters.push(currentCluster);
 
-            // تخصیص ستون (کنار هم) به هر رویداد داخل هر خوشه
             clusters.forEach(cluster => {
                 const colLastEnd = [];
                 cluster.forEach(item => {
@@ -1215,14 +1530,12 @@ try {
         }
 
         function drawEventsOnGrid() {
-            // اعمال فیلتر نمایش (همه / فقط درسی / فقط متفرقه)
             const filtered = loadedEvents.filter(ev => {
                 if (calendarFilter === 'study') return isEventStudyType(ev);
                 if (calendarFilter === 'misc')  return !isEventStudyType(ev);
                 return true;
             });
 
-            // گروه‌بندی بر اساس روز
             const byDate = {};
             filtered.forEach(ev => {
                 if (!byDate[ev.g_date]) byDate[ev.g_date] = [];
@@ -1311,7 +1624,6 @@ try {
             todayCol.appendChild(line);
         }
 
-        // به‌روزرسانی نوار آمار تفکیک‌شده (مطالعه درسی جدا، کارهای متفرقه جدا)
         function updateCalendarStatsBar(stats) {
             const studyTotal = stats.study_total !== undefined ? stats.study_total : (stats.total || 0);
             const studyComp  = stats.study_completed !== undefined ? stats.study_completed : (stats.completed || 0);
@@ -1374,7 +1686,6 @@ try {
             badge.textContent = `درصد: ${pct.toFixed(1)}%`;
         }
 
-        // بررسی زنده تداخل زمانی هنگام ثبت یا ویرایش برنامه
         function checkLiveOverlapWarning() {
             const warnBox = document.getElementById('overlap-warning-box');
             const gDate   = document.getElementById('ev-date').value;
@@ -1428,6 +1739,10 @@ try {
             document.getElementById('ev-start').value = startTime;
             document.getElementById('ev-end').value = endTime;
 
+            // تنظیم وضعیت تیک پیامک بر اساس اشتراک کاربر
+            document.getElementById('ev-send-sms').checked = !!userSub.is_vip;
+            refreshSubscriptionUI();
+
             renderCategoryOptionsInModal('#4f46e5');
             checkLiveOverlapWarning();
 
@@ -1449,7 +1764,8 @@ try {
             document.getElementById('ev-desc').value = ev.description || '';
             document.getElementById('ev-pdf-id').value = ev.pdf_id || '';
             document.getElementById('ev-pdf-page').value = ev.pdf_page || 1;
-            document.getElementById('ev-send-sms').checked = Number(ev.send_sms ?? 1) === 1;
+            document.getElementById('ev-send-sms').checked = userSub.is_vip && (Number(ev.send_sms ?? 1) === 1);
+            refreshSubscriptionUI();
 
             document.getElementById('ev-test-correct').value = (ev.test_correct !== null && ev.test_correct !== undefined) ? ev.test_correct : '';
             document.getElementById('ev-test-wrong').value   = (ev.test_wrong !== null && ev.test_wrong !== undefined) ? ev.test_wrong : '';
@@ -1492,7 +1808,7 @@ try {
             e.preventDefault();
             const formData = new FormData(document.getElementById('event-form'));
             formData.append('action', 'save');
-            if (!document.getElementById('ev-send-sms').checked) {
+            if (!document.getElementById('ev-send-sms').checked || !userSub.is_vip) {
                 formData.set('send_sms', '0');
             }
             const res = await fetch('api_calendar.php', { method: 'POST', body: formData });
@@ -1548,7 +1864,6 @@ try {
             startPauseTimer();
         }
 
-        // کپی برنامه‌های یک روز به روزی دیگر
         function openCopyDayModal() {
             const m = document.getElementById('copy-day-modal');
             m.classList.remove('hidden');
@@ -1611,7 +1926,7 @@ try {
         }
 
         // ====================================================
-        // مدیریت پوشه‌بندی آکاردئونی، انتقال جزوه و موتور ضدخطای PDFخوان
+        // مدیریت پوشه‌بندی، محدودیت‌های کاربر عادی و موتور PDFخوان
         // ====================================================
         let pdfFolders = [];
         let pdfList = [];
@@ -1634,11 +1949,15 @@ try {
                 if (data.status === 'success') {
                     pdfFolders = data.folders || [];
                     pdfList    = data.pdfs || [];
+                    if (data.subscription) {
+                        userSub = data.subscription;
+                    }
                     pdfFolders.forEach(f => {
                         if (openFolderIds[f.id] === undefined) {
                             openFolderIds[f.id] = true;
                         }
                     });
+                    refreshSubscriptionUI();
                     renderFolderAccordionList();
                     syncDropdowns();
                 }
@@ -1654,7 +1973,8 @@ try {
                 let html = '<option value="">-- بدون جزوه --</option>';
                 pdfList.forEach(p => {
                     const folderPrefix = p.folder_name ? `[${p.folder_name}] ` : '';
-                    html += `<option value="${p.id}">${escapeHtml(folderPrefix + p.title)}</option>`;
+                    const lockPrefix   = p.is_locked ? '🔒 ' : '';
+                    html += `<option value="${p.id}">${escapeHtml(lockPrefix + folderPrefix + p.title)}</option>`;
                 });
                 evSelect.innerHTML = html;
                 evSelect.value = cur;
@@ -1749,11 +2069,15 @@ try {
             const last  = Math.min(total, Math.max(1, Number(item.last_page)));
             const pct   = Math.round((last / total) * 100);
             const starCount = Array.isArray(item.starred_pages) ? item.starred_pages.length : 0;
+            const isLocked  = !!item.is_locked;
 
             return `
-                <div onclick="loadAndOpenPdf(${item.id}, ${last})" class="p-2.5 rounded-xl border transition cursor-pointer ${isActive ? 'border-indigo-600 bg-indigo-50/80 ring-1 ring-indigo-500' : 'border-slate-200 hover:border-indigo-300 bg-slate-50/40'}">
+                <div onclick="loadAndOpenPdf(${item.id}, ${last})" class="p-2.5 rounded-xl border transition cursor-pointer ${isLocked ? 'border-amber-300 bg-amber-50/40 opacity-80' : (isActive ? 'border-indigo-600 bg-indigo-50/80 ring-1 ring-indigo-500' : 'border-slate-200 hover:border-indigo-300 bg-slate-50/40')}">
                     <div class="flex items-start justify-between gap-1">
-                        <h4 class="text-xs font-extrabold text-slate-800 leading-snug">${escapeHtml(item.title)}</h4>
+                        <div class="min-w-0">
+                            <h4 class="text-xs font-extrabold text-slate-800 leading-snug truncate">${isLocked ? '🔒 ' : ''}${escapeHtml(item.title)}</h4>
+                            ${isLocked ? `<span class="inline-block mt-1 text-[10px] bg-amber-200/80 text-amber-950 px-1.5 py-0.5 rounded font-bold">نیاز به تمدید اشتراک ویژه</span>` : ''}
+                        </div>
                         <div class="flex items-center gap-1 shrink-0" onclick="event.stopPropagation()">
                             ${starCount > 0 ? `<span class="text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-bold">⭐${starCount}</span>` : ''}
                             <button type="button" onclick="openMovePdfModal(event, ${item.id}, '${item.folder_id || ''}')" class="text-slate-500 hover:text-indigo-600 text-xs px-1" title="انتقال به پوشه دیگر">📁</button>
@@ -1861,12 +2185,28 @@ try {
             }
         }
 
+        // بررسی سهمیه کاربر عادی هنگام کلیک روی دکمه آپلود PDF
         function openUploadModal(defaultFolderId = '') {
+            if (!userSub.is_vip && pdfList.length >= FREE_MAX_PDF_CNT) {
+                openSubscriptionModal(`شما کاربر عادی هستید و سهمیه ${FREE_MAX_PDF_CNT} فایل رایگان شما پر شده است. برای آپلود فایل جدید، لطفاً فایل قبلی را حذف کنید یا اشتراک ویژه تهیه نمایید.`);
+                return;
+            }
+
             document.getElementById('upload-pdf-form').reset();
             syncDropdowns();
             if (defaultFolderId !== undefined && defaultFolderId !== null) {
                 document.getElementById('upload-folder-select').value = String(defaultFolderId);
             }
+
+            const hintEl = document.getElementById('upload-modal-tier-hint');
+            if (userSub.is_vip) {
+                hintEl.className = 'p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-[11px] font-bold';
+                hintEl.textContent = `👑 اشتراک ویژه فعال: امکان آپلود نامحدود جزوه تا سقف ${VIP_MAX_PDF_MB} مگابایت برای هر فایل.`;
+            } else {
+                hintEl.className = 'p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-[11px] font-bold';
+                hintEl.textContent = `👤 حساب عادی: حداکثر ${FREE_MAX_PDF_CNT} فایل PDF با حداکثر حجم ${FREE_MAX_PDF_MB} مگابایت مجاز است.`;
+            }
+
             const m = document.getElementById('upload-pdf-modal');
             m.classList.remove('hidden');
             m.classList.add('flex');
@@ -1880,6 +2220,24 @@ try {
 
         async function handlePdfUpload(e) {
             e.preventDefault();
+            const fileInput = document.getElementById('upload-pdf-file-input');
+            const file = fileInput.files[0];
+            if (!file) return;
+
+            // بررسی آنی حجم فایل در مرورگر قبل از ارسال به سرور
+            const maxAllowedMB = userSub.is_vip ? VIP_MAX_PDF_MB : FREE_MAX_PDF_MB;
+            const fileSizeMB   = +(file.size / (1024 * 1024)).toFixed(1);
+
+            if (file.size > maxAllowedMB * 1024 * 1024) {
+                if (!userSub.is_vip) {
+                    closeUploadModal();
+                    openSubscriptionModal(`حجم فایل انتخابی شما (${fileSizeMB} مگابایت) بیشتر از سقف مجاز کاربران عادی (${FREE_MAX_PDF_MB} مگابایت) است. با تهیه اشتراک ویژه، فایل‌های تا ${VIP_MAX_PDF_MB} مگابایت را بدون محدودیت آپلود کنید.`);
+                } else {
+                    alert(`حجم فایل (${fileSizeMB} مگابایت) بیش از سقف مجاز سرور (${VIP_MAX_PDF_MB} مگابایت) است.`);
+                }
+                return;
+            }
+
             const btn = document.getElementById('btn-submit-upload');
             btn.disabled = true;
             btn.textContent = 'در حال آپلود...';
@@ -1897,6 +2255,9 @@ try {
                     closeUploadModal();
                     await fetchUserPdfs();
                     loadAndOpenPdf(data.pdf.id, 1);
+                } else if (data.need_vip) {
+                    closeUploadModal();
+                    openSubscriptionModal(data.message);
                 } else {
                     alert(data.message || 'خطا در آپلود');
                 }
@@ -1923,13 +2284,19 @@ try {
         }
 
         // ====================================================
-        // بارگذاری باینری و بدون خطای PDF (همراه با تنظیمات دقیق فونت‌های فارسی و انگلیسی)
+        // بارگذاری باینری و بدون خطای PDF (همراه با بررسی قفل اشتراک)
         // ====================================================
         async function loadAndOpenPdf(pdfId, targetPage = null) {
             if (pdfList.length === 0) await fetchUserPdfs();
-            activePdfMeta = pdfList.find(p => Number(p.id) === Number(pdfId));
-            if (!activePdfMeta) return;
+            const targetItem = pdfList.find(p => Number(p.id) === Number(pdfId));
+            if (!targetItem) return;
 
+            if (targetItem.is_locked) {
+                openSubscriptionModal(`جزوه «${targetItem.title}» به دلیل اتمام مهلت اشتراک ویژه قفل شده است. برای دسترسی مجدد به تمام جزوات و هایلایت‌های خود، اشتراک را تمدید نمایید (یا جزوات دیگر را حذف کنید تا فقط ۱ جزوه باقی بماند).`);
+                return;
+            }
+
+            activePdfMeta = targetItem;
             if (activePdfMeta.folder_id) {
                 openFolderIds[activePdfMeta.folder_id] = true;
             }
@@ -1947,6 +2314,13 @@ try {
                     cache: 'no-store',
                     credentials: 'same-origin'
                 });
+
+                if (rawResponse.status === 403) {
+                    document.getElementById('pdf-loading-overlay').classList.add('hidden');
+                    document.getElementById('pdf-empty-state').classList.remove('hidden');
+                    openSubscriptionModal('این جزوه نیازمند تمدید اشتراک ویژه است.');
+                    return;
+                }
 
                 if (!rawResponse.ok) {
                     throw new Error(`خطای سرور در دریافت فایل (کد ${rawResponse.status})`);
@@ -2059,7 +2433,6 @@ try {
                 ctx.fillRect(0, 0, canvas.width, canvas.height);
                 ctx.restore();
 
-                // قفل کردن جهت رندر متون بوم روی چپ‌به‌راست استاندارد PDF
                 ctx.direction = 'ltr';
                 ctx.textAlign = 'left';
 
@@ -2616,6 +2989,7 @@ try {
         // مدیریت شماره موبایل و پیامک یادآوری sms.ir
         // ====================================================
         function openPhoneModal() {
+            refreshSubscriptionUI();
             const m = document.getElementById('phone-modal');
             m.classList.remove('hidden');
             m.classList.add('flex');
@@ -2629,13 +3003,17 @@ try {
 
         async function handleUpdatePhone(e) {
             e.preventDefault();
+            const newPhone = document.getElementById('user-phone-input').value;
             const fd = new FormData();
             fd.append('action', 'update_phone');
-            fd.append('phone', document.getElementById('user-phone-input').value);
+            fd.append('phone', newPhone);
             const res = await fetch('api_calendar.php', { method: 'POST', body: fd });
             const data = await res.json();
             alert(data.message);
-            if (data.status === 'success') closePhoneModal();
+            if (data.status === 'success') {
+                userSub.phone = newPhone;
+                closePhoneModal();
+            }
         }
 
         async function triggerSmsCheckNow(showAlert = false) {
@@ -2643,7 +3021,7 @@ try {
                 const res = await fetch('cron_sms.php');
                 const data = await res.json();
                 if (showAlert) {
-                    alert(`بررسی انجام شد.\nبرنامه‌های عقب‌افتاده: ${data.overdue_found}\nپیامک ارسال‌شده: ${data.sms_sent}`);
+                    alert(`بررسی انجام شد.\nبرنامه‌های عقب‌افتاده کاربران ویژه: ${data.overdue_found}\nپیامک ارسال‌شده: ${data.sms_sent}`);
                 }
             } catch (e) {}
         }
@@ -2659,6 +3037,7 @@ try {
         });
 
         window.addEventListener('DOMContentLoaded', () => {
+            refreshSubscriptionUI();
             initTimeLabels();
             renderCalendar();
             fetchUserPdfs();

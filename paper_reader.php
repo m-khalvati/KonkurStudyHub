@@ -4,14 +4,14 @@ require_login();
 
 $user_id = (int)$_SESSION['user_id'];
 
-if (!defined('TELEGRAM_SALES_ID'))  define('TELEGRAM_SALES_ID', 'YourTelegramID');
-if (!defined('FREE_MAX_PDF_COUNT')) define('FREE_MAX_PDF_COUNT', 1);
-if (!defined('FREE_MAX_PDF_MB'))    define('FREE_MAX_PDF_MB', 3);
-if (!defined('VIP_MAX_PDF_MB'))     define('VIP_MAX_PDF_MB', 64);
-if (!defined('PLAN_1M_PRICE'))      define('PLAN_1M_PRICE', '۵۰۰,۰۰۰');
-if (!defined('PLAN_3M_PRICE'))      define('PLAN_3M_PRICE', '۱,۲۰۰,۰۰۰');
+if (!defined('TELEGRAM_SALES_ID'))      define('TELEGRAM_SALES_ID', 'YourTelegramID');
+if (!defined('FREE_MAX_PDF_COUNT'))     define('FREE_MAX_PDF_COUNT', 1);
+if (!defined('FREE_MAX_PDF_MB'))        define('FREE_MAX_PDF_MB', 3);
+if (!defined('VIP_MAX_PDF_MB'))         define('VIP_MAX_PDF_MB', 64);
+if (!defined('PLAN_1M_PRICE'))          define('PLAN_1M_PRICE', '۵۰۰,۰۰۰');
+if (!defined('PLAN_3M_PRICE'))          define('PLAN_3M_PRICE', '۱,۲۰۰,۰۰۰');
 if (!defined('AI_TRANSLATION_ENABLED')) define('AI_TRANSLATION_ENABLED', true);
-if (!defined('AI_VIP_ONLY'))        define('AI_VIP_ONLY', true);
+if (!defined('AI_VIP_ONLY'))            define('AI_VIP_ONLY', true);
 
 $initial_sub = function_exists('get_user_subscription_info')
     ? get_user_subscription_info($pdo, $user_id)
@@ -32,7 +32,7 @@ $initial_sub = function_exists('get_user_subscription_info')
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>مقاله‌خوان هوشمند و مترجم آکادمیک | کنکور و پژوهش</title>
+    <title>مقاله‌خوان هوشمند و مترجم آکادمیک v3.6</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css" rel="stylesheet">
 
@@ -46,7 +46,7 @@ $initial_sub = function_exists('get_user_subscription_info')
         .custom-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
         .pdf-dark-mode { filter: invert(0.92) hue-rotate(180deg) contrast(1.05); }
 
-        /* قفل کردن جهت LTR روی بوم PDF و لایه پاراگراف‌ها برای حفظ کامل ساختار مقالات انگلیسی */
+        /* قفل کردن جهت LTR روی بوم PDF و لایه جملات برای حفظ کامل ساختار مقالات انگلیسی */
         #paper-canvas-wrapper,
         #paper-render-canvas,
         #paper-paragraphs-layer {
@@ -56,31 +56,59 @@ $initial_sub = function_exists('get_user_subscription_info')
             font-family: sans-serif !important;
         }
 
-        /* استایل باکس‌های تعاملی هر بند (پاراگراف) از مقاله */
-        .para-hotspot {
+        /* استایل قطعات هر جمله/بند روی صفحه PDF */
+        .seg-box {
             position: absolute;
-            border-radius: 5px;
-            border: 1.5px solid transparent;
+            border-radius: 3px;
+            border: 1px solid transparent;
             background-color: transparent;
             cursor: pointer;
-            transition: all 0.15s ease;
+            transition: background-color 0.12s ease, border-color 0.12s ease;
         }
-        .para-hotspot:hover {
+        /* وقتی موس روی یکی از قطعات یک جمله می‌رود، کل آن جمله (از نقطه تا نقطه) هایلایت می‌شود */
+        .seg-box.hover-seg {
             border-color: rgba(79, 70, 229, 0.65);
-            background-color: rgba(99, 102, 241, 0.14);
-            box-shadow: 0 2px 8px rgba(79, 70, 229, 0.12);
+            background-color: rgba(99, 102, 241, 0.18);
         }
-        .para-hotspot.active-para {
-            border: 2px solid #4f46e5 !important;
-            background-color: rgba(79, 70, 229, 0.22) !important;
-            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+        /* ۱. جمله خوانده‌شده در این جلسه */
+        .seg-box.read-seg {
+            background-color: rgba(56, 189, 248, 0.10);
+            border-bottom: 1px dashed rgba(2, 132, 199, 0.35);
+        }
+        /* ۲. جمله دارای فیش ذخیره‌شده (سبز زمردی) */
+        .seg-box.noted-seg {
+            border-color: rgba(16, 185, 129, 0.85) !important;
+            background-color: rgba(16, 185, 129, 0.20) !important;
+        }
+        .seg-box.noted-seg-first::after {
+            content: '📌';
+            position: absolute;
+            top: -8px;
+            left: -8px;
+            font-size: 10px;
+            background: #ecfdf5;
+            border: 1px solid #10b981;
+            border-radius: 999px;
+            width: 16px;
+            height: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+            z-index: 20;
+        }
+        /* ۳. جمله فعال در حال ترجمه */
+        .seg-box.active-seg {
+            border: 1.5px solid #4f46e5 !important;
+            background-color: rgba(79, 70, 229, 0.26) !important;
+            z-index: 15;
         }
     </style>
 </head>
 <body class="bg-slate-100 text-slate-800 h-screen flex flex-col overflow-hidden select-none">
 
     <!-- ==================================================== -->
-    <!-- ۱. هدر اصلی سامانه (مشترک و هماهنگ با داشبورد اصلی) -->
+    <!-- ۱. هدر اصلی سامانه -->
     <!-- ==================================================== -->
     <header id="main-app-header" class="bg-slate-900 text-white px-3 md:px-4 py-2 flex flex-wrap items-center justify-between gap-2 shadow-md z-30 shrink-0">
         <div class="flex items-center gap-2 md:gap-3">
@@ -89,7 +117,6 @@ $initial_sub = function_exists('get_user_subscription_info')
                 <span class="font-bold text-xs md:text-sm truncate max-w-[90px] sm:max-w-none"><?php echo htmlspecialchars($_SESSION['full_name']); ?></span>
             </div>
 
-            <!-- منوی ناوبری بین تقویم، جزوه‌خوان و مقاله‌خوان -->
             <nav class="flex bg-slate-800 p-0.5 rounded-xl border border-slate-700">
                 <a href="index.php" class="px-2.5 md:px-3 py-1.5 rounded-lg text-xs font-bold text-slate-300 hover:text-white transition">
                     📅 تقویم
@@ -104,7 +131,6 @@ $initial_sub = function_exists('get_user_subscription_info')
         </div>
 
         <div class="flex items-center gap-1.5 md:gap-2 text-xs">
-            <!-- دکمه وضعیت اشتراک -->
             <button type="button" id="header-sub-btn" onclick="openSubscriptionModal()" class="<?php echo $initial_sub['is_vip'] ? 'bg-gradient-to-r from-amber-500 to-yellow-400 text-slate-950' : 'bg-indigo-600 hover:bg-indigo-500 text-white border border-indigo-400'; ?> px-2.5 py-1.5 rounded-lg font-extrabold flex items-center gap-1 shadow-xs transition">
                 <?php if ($initial_sub['is_vip']): ?>
                     <span>👑 ویژه (<?php echo $initial_sub['days_left']; ?> روز | +تمدید)</span>
@@ -125,21 +151,19 @@ $initial_sub = function_exists('get_user_subscription_info')
     </header>
 
     <!-- ==================================================== -->
-    <!-- ۲. بدنه اصلی مقاله‌خوان (سایدبار مقالات + نمایشگر PDF + پنل ترجمه) -->
+    <!-- ۲. بدنه اصلی مقاله‌خوان -->
     <!-- ==================================================== -->
     <main class="flex-1 flex overflow-hidden relative bg-slate-900">
 
-        <!-- پس‌زمینه تیره سایدبار در موبایل -->
         <div id="paper-sidebar-backdrop" onclick="closePaperSidebarMobile()" class="fixed inset-0 bg-black/60 z-30 hidden lg:hidden"></div>
 
-        <!-- الف) سایدبار کتابخانه مقالات (پوشه مجزای uploads/papers + ایمپورت از جزوه‌خوان) -->
+        <!-- الف) سایدبار کتابخانه مقالات -->
         <aside id="paper-sidebar" class="w-72 max-w-[85vw] bg-white border-l border-slate-200 flex flex-col shrink-0 z-40 fixed lg:static inset-y-0 right-0 transform translate-x-full lg:translate-x-0 transition-transform duration-200 shadow-2xl lg:shadow-none">
             <div class="p-3 border-b border-slate-200 flex items-center justify-between bg-slate-50">
                 <h2 class="font-extrabold text-xs md:text-sm text-slate-800">📄 کتابخانه مقالات من</h2>
                 <button type="button" onclick="closePaperSidebarMobile()" class="lg:hidden text-slate-400 hover:text-slate-700 text-xl font-bold leading-none">&times;</button>
             </div>
 
-            <!-- دکمه‌های آپلود مقاله جدید و ایمپورت از جزوه‌خوان -->
             <div class="p-2.5 border-b border-slate-200 bg-slate-50/60 grid grid-cols-2 gap-1.5 text-[11px]">
                 <button type="button" onclick="openUploadPaperModal()" class="bg-indigo-600 hover:bg-indigo-700 text-white py-2 px-2 rounded-xl font-bold shadow-2xs transition flex items-center justify-center gap-1">
                     <span>+ آپلود مقاله</span>
@@ -149,28 +173,24 @@ $initial_sub = function_exists('get_user_subscription_info')
                 </button>
             </div>
 
-            <!-- بنر سهمیه آپلود -->
             <div id="paper-quota-banner" class="px-3 py-1.5 text-[11px] border-b border-amber-200 bg-amber-50 text-amber-900 font-bold flex items-center justify-between"></div>
 
-            <!-- لیست مقالات -->
             <div id="papers-list-container" class="flex-1 overflow-y-auto p-2.5 space-y-2 custom-scroll"></div>
         </aside>
 
-        <!-- ب) بخش میانی: نمایشگر مقاله انگلیسی با لایه تشخیص هوشمند بندها -->
+        <!-- ب) بخش میانی: نمایشگر مقاله انگلیسی با لایه تشخیص جمله‌به‌جمله (از نقطه تا نقطه) -->
         <section class="flex-1 flex flex-col overflow-hidden relative bg-slate-800">
             
-            <!-- نوار ابزار بالای مقاله -->
             <div class="bg-slate-900/95 text-white border-b border-slate-700 px-2.5 py-1.5 flex flex-wrap items-center justify-between gap-2 shrink-0 z-20">
                 <div class="flex items-center gap-1.5 min-w-0">
                     <button type="button" onclick="togglePaperSidebar()" class="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-xs font-bold text-white shrink-0">
                         ☰ مقالات
                     </button>
-                    <span id="active-paper-title" class="text-xs font-bold text-slate-200 truncate max-w-[140px] sm:max-w-xs">
+                    <span id="active-paper-title" class="text-xs font-bold text-slate-200 truncate max-w-[120px] sm:max-w-xs">
                         مقاله‌ای انتخاب نشده است
                     </span>
                 </div>
 
-                <!-- کنترل ورق زدن صفحه -->
                 <div id="paper-page-controls" class="hidden items-center gap-1 shrink-0">
                     <button type="button" onclick="changePaperPage(-1)" class="px-2 py-1 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs font-bold" title="صفحه قبل">❮</button>
                     <div class="flex items-center gap-1 text-xs font-bold bg-slate-800 px-2 py-0.5 rounded-lg border border-slate-700">
@@ -181,41 +201,50 @@ $initial_sub = function_exists('get_user_subscription_info')
                     <button type="button" onclick="changePaperPage(1)" class="px-2 py-1 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs font-bold" title="صفحه بعد">❯</button>
                 </div>
 
-                <!-- کنترل زوم، حالت شب و نمایش پنل ترجمه در موبایل -->
+                <!-- سوئیچ حالت انتخاب (نقطه تا نقطه vs پاراگراف) + زوم -->
                 <div class="flex items-center gap-1 shrink-0">
+                    <div class="flex bg-slate-800 p-0.5 rounded-lg border border-slate-700 text-[10px]">
+                        <button type="button" id="mode-btn-sentence" onclick="setSelectionGranularity('sentence')" class="px-2 py-1 rounded-md font-extrabold bg-indigo-600 text-white transition" title="انتخاب از نقطه قبلی تا نقطه بعدی (جمله‌به‌جمله)">
+                            🎯 نقطه تا نقطه
+                        </button>
+                        <button type="button" id="mode-btn-paragraph" onclick="setSelectionGranularity('paragraph')" class="px-2 py-1 rounded-md font-bold text-slate-300 hover:text-white transition" title="انتخاب کل پاراگراف هم‌ستون">
+                            📄 پاراگراف
+                        </button>
+                    </div>
+
                     <div id="paper-zoom-controls" class="hidden sm:flex items-center gap-1">
                         <button type="button" onclick="adjustPaperZoom(-0.2)" class="px-2 py-1 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs font-bold" title="کوچک‌نمایی">➖</button>
                         <button type="button" onclick="setPaperFitWidth()" class="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-indigo-300 rounded-lg text-[11px] font-bold">↔ عرض</button>
                         <button type="button" onclick="adjustPaperZoom(0.2)" class="px-2 py-1 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs font-bold" title="بزرگ‌نمایی">➕</button>
                     </div>
                     <button type="button" onclick="togglePaperDarkMode()" id="btn-paper-dark" class="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-amber-300 rounded-lg text-xs font-bold" title="حالت شب">🌙</button>
-                    <button type="button" onclick="openMobileTranslatorSheet()" class="md:hidden px-2.5 py-1 bg-emerald-600 text-white rounded-lg text-xs font-bold">
-                        🌐 پنل ترجمه
+                    <button type="button" onclick="openMobileTranslatorSheet()" class="md:hidden px-2 py-1 bg-emerald-600 text-white rounded-lg text-xs font-bold">
+                        🌐 ترجمه
                     </button>
                 </div>
             </div>
 
             <!-- راهنمای نوار باریک بالای بوم مقاله -->
-            <div id="paper-hint-bar" class="hidden bg-indigo-950/90 text-indigo-200 px-3 py-1 text-[11px] font-bold border-b border-indigo-800/60 items-center justify-between shrink-0">
-                <span>💡 روی هر بند (پاراگراف) یا عنوان از مقاله کلیک کنید تا بلافاصله در ستون کناری به فارسی ترجمه شود.</span>
-                <span id="detected-blocks-badge" class="text-[10px] bg-indigo-800/80 text-white px-2 py-0.5 rounded-full">0 بند تشخیص داده شد</span>
+            <div id="paper-hint-bar" class="hidden bg-indigo-950/90 text-indigo-200 px-3 py-1 text-[11px] font-bold border-b border-indigo-800/60 flex-wrap items-center justify-between gap-2 shrink-0">
+                <div class="flex items-center gap-3">
+                    <span id="granularity-hint-text">🎯 حالت نقطه تا نقطه: روی هر جمله کلیک کنید تا از نقطه قبلی تا نقطه بعدی ترجمه شود (با تفکیک خودکار ستون چپ و راست).</span>
+                </div>
+                <span id="detected-blocks-badge" class="text-[10px] bg-indigo-800/80 text-white px-2 py-0.5 rounded-full shrink-0">0 جمله</span>
             </div>
 
             <!-- ناحیه اسکرول و رندر بوم PDF مقاله -->
             <div id="paper-viewport-container" class="flex-1 overflow-auto p-1.5 sm:p-4 flex justify-center items-start custom-scroll relative">
                 
-                <!-- لودینگ بارگذاری مقاله -->
                 <div id="paper-loading-overlay" class="hidden my-auto text-center bg-slate-900/95 text-white p-6 rounded-2xl shadow-xl border border-slate-700 z-30">
                     <div class="text-3xl mb-2 animate-bounce">⏳</div>
-                    <div class="text-xs font-bold text-indigo-300">در حال بارگذاری مقاله و استخراج هوشمند بندهای متن...</div>
+                    <div class="text-xs font-bold text-indigo-300">در حال بارگذاری مقاله و تفکیک ستون‌ها و جملات...</div>
                 </div>
 
-                <!-- وضعیت خالی قبل از انتخاب مقاله -->
                 <div id="paper-empty-state" class="my-auto text-center bg-slate-900/90 text-white p-6 rounded-2xl shadow-xl max-w-sm border border-slate-700">
                     <div class="text-4xl mb-2">🌐</div>
                     <h3 class="font-extrabold text-sm mb-1">محيط مقاله‌خوان و مترجم هوشمند</h3>
                     <p class="text-slate-400 text-xs mb-4 leading-relaxed">
-                        یک مقاله انگلیسی (PDF) آپلود کنید یا از بخش جزوه‌خوان وارد نمایید؛ سپس با کلیک روی هر پاراگراف، ترجمه فارسی روان و علمی آن را ببینید.
+                        یک مقاله انگلیسی (PDF) آپلود کنید یا از بخش جزوه‌خوان وارد نمایید؛ سپس با کلیک روی هر جمله (از نقطه تا نقطه)، ترجمه فارسی، پیام کلیدی و تلفظ صوتی آن را دریافت کنید.
                     </p>
                     <div class="flex flex-wrap gap-2 justify-center">
                         <button type="button" onclick="openUploadPaperModal()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold">
@@ -227,23 +256,21 @@ $initial_sub = function_exists('get_user_subscription_info')
                     </div>
                 </div>
 
-                <!-- بوم رندر PDF + لایه باکس‌های تعاملی پاراگراف‌ها (کاملاً ایزوله با dir="ltr") -->
+                <!-- بوم رندر PDF + لایه باکس‌های تعاملی جملات -->
                 <div id="paper-canvas-wrapper" dir="ltr" class="hidden relative shadow-2xl bg-white">
                     <canvas id="paper-render-canvas" dir="ltr" class="block"></canvas>
-                    <!-- لایه شفاف تشخیص و کلیک روی بندهای مقاله -->
                     <div id="paper-paragraphs-layer" dir="ltr" class="absolute inset-0"></div>
                 </div>
             </div>
         </section>
 
-        <!-- ج) پنل ترجمه و فیش‌برداری (ستون ثابت در دسکتاپ + پنجره کشویی Bottom-Sheet در موبایل) -->
-        <aside id="translator-panel" class="w-full md:w-96 lg:w-[420px] bg-white border-r border-slate-200 flex flex-col shrink-0 z-40 fixed md:static inset-x-0 bottom-0 max-h-[82vh] md:max-h-none rounded-t-3xl md:rounded-none transform translate-y-full md:translate-y-0 transition-transform duration-200 shadow-2xl md:shadow-none">
+        <!-- ج) پنل ترجمه، پلیر صوتی و فیش‌برداری -->
+        <aside id="translator-panel" class="w-full md:w-96 lg:w-[440px] bg-white border-r border-slate-200 flex flex-col shrink-0 z-40 fixed md:static inset-x-0 bottom-0 max-h-[85vh] md:max-h-none rounded-t-3xl md:rounded-none transform translate-y-full md:translate-y-0 transition-transform duration-200 shadow-2xl md:shadow-none">
             
-            <!-- هدر پنل ترجمه و تب‌ها (مترجم زنده / دفترچه فیش‌ها) -->
             <div class="bg-slate-900 text-white px-3.5 py-2.5 flex items-center justify-between border-b border-slate-800 rounded-t-3xl md:rounded-none shrink-0">
                 <div class="flex bg-slate-800 p-0.5 rounded-xl border border-slate-700 text-xs">
                     <button type="button" id="tab-btn-translate" onclick="switchTranslatorTab('translate')" class="px-3 py-1 rounded-lg font-extrabold bg-indigo-600 text-white transition">
-                        🌐 ترجمه زنده
+                        🌐 ترجمه و تحلیل
                     </button>
                     <button type="button" id="tab-btn-notes" onclick="switchTranslatorTab('notes')" class="px-3 py-1 rounded-lg font-bold text-slate-300 hover:text-white transition flex items-center gap-1">
                         <span>📌 فیش‌های مقاله</span>
@@ -251,39 +278,15 @@ $initial_sub = function_exists('get_user_subscription_info')
                     </button>
                 </div>
 
-                <div class="flex items-center gap-1.5">
-                    <button type="button" onclick="toggleByokBox()" class="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 rounded-lg text-[11px] font-bold" title="تنظیم کلید API هوش مصنوعی شخصی">
-                        🔑 کلید AI
-                    </button>
-                    <button type="button" onclick="closeMobileTranslatorSheet()" class="md:hidden text-slate-400 hover:text-white text-xl font-bold px-1 leading-none">&times;</button>
-                </div>
-            </div>
-
-            <!-- باکس تنظیم کلید API شخصی کاربر (BYOK - ذخیره در مرورگر کاربر) -->
-            <div id="byok-settings-box" class="hidden bg-slate-800 text-white p-3 border-b border-slate-700 text-xs space-y-2 shrink-0">
-                <div class="flex items-center justify-between">
-                    <span class="font-extrabold text-amber-300 text-[11px]">🔑 کلید API هوش مصنوعی شخصی (اختیاری)</span>
-                    <button type="button" onclick="toggleByokBox()" class="text-slate-400 hover:text-white">&times;</button>
-                </div>
-                <p class="text-[10px] text-slate-300 leading-relaxed">
-                    می‌توانید کلید رایگان Google Gemini یا OpenAI خود را وارد کنید تا بدون محدودیت از ترجمه تخصصی هوش مصنوعی استفاده نمایید:
-                </p>
-                <div class="flex gap-1.5">
-                    <select id="user-custom-provider" class="px-2 py-1.5 rounded-lg bg-slate-900 border border-slate-600 text-xs font-bold">
-                        <option value="gemini">Gemini</option>
-                        <option value="openai">OpenAI</option>
-                    </select>
-                    <input type="password" id="user-custom-api-key" dir="ltr" placeholder="AIzaSy... یا sk-..." class="flex-1 px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-600 text-left font-mono text-xs">
-                    <button type="button" onclick="saveUserCustomApiKey()" class="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-lg font-bold">ذخیره</button>
-                </div>
+                <button type="button" onclick="closeMobileTranslatorSheet()" class="md:hidden text-slate-400 hover:text-white text-xl font-bold px-1 leading-none">&times;</button>
             </div>
 
             <!-- ========================================== -->
-            <!-- تب ۱: مترجم زنده بندهای مقاله -->
+            <!-- تب ۱: مترجم زنده، پیمایش جملات، پلیر صوتی و خلاصه‌ساز -->
             <!-- ========================================== -->
             <div id="panel-tab-translate" class="flex-1 flex flex-col overflow-y-auto p-3.5 space-y-3 custom-scroll text-xs">
                 
-                <!-- انتخاب موتور ترجمه (Google / MyMemory / هوش مصنوعی VIP) -->
+                <!-- انتخاب موتور ترجمه -->
                 <div>
                     <label class="block font-extrabold text-slate-700 mb-1.5 text-[11px]">⚙️ انتخاب موتور مترجم:</label>
                     <div class="grid grid-cols-3 gap-1.5">
@@ -302,65 +305,135 @@ $initial_sub = function_exists('get_user_subscription_info')
                     </div>
                 </div>
 
-                <!-- کادر متن انگلیسی انتخاب شده (همراه با تلفظ صوتی و امکان ویرایش/تایپ دستی) -->
+                <!-- کادر متن انگلیسی + دکمه‌های جمله قبل/بعد + پلیر صوتی پیشرفته -->
                 <div class="bg-slate-50 rounded-2xl p-3 border border-slate-200 space-y-2">
-                    <div class="flex items-center justify-between">
-                        <span class="font-extrabold text-slate-700 text-[11px]">🇬🇧 متن انگلیسی انتخاب‌شده:</span>
-                        <div class="flex items-center gap-1">
-                            <button type="button" onclick="speakEnglishText()" class="px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg font-bold text-[11px] flex items-center gap-1 transition" title="تلفظ صوتی متن انگلیسی">
-                                <span>🔊 تلفظ</span>
-                            </button>
-                            <button type="button" onclick="translateCurrentSourceText()" class="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-[11px] transition">
-                                🔄 ترجمه مجدد
-                            </button>
-                        </div>
-                    </div>
-                    <textarea id="source-english-textarea" dir="ltr" rows="4" placeholder="روی یکی از بندهای مقاله کلیک کنید یا هر عبارت/لغت انگلیسی را اینجا بنویسید..." class="w-full p-2.5 bg-white border border-slate-200 rounded-xl text-left font-sans text-xs text-slate-800 leading-relaxed focus:outline-none focus:ring-2 focus:ring-indigo-500"></textarea>
-                </div>
-
-                <!-- کادر خروجی ترجمه فارسی -->
-                <div class="flex-1 flex flex-col bg-indigo-50/50 rounded-2xl p-3.5 border border-indigo-100 min-h-[180px]">
-                    <div class="flex items-center justify-between border-b border-indigo-100 pb-2 mb-2.5">
-                        <span class="font-extrabold text-indigo-950 text-xs flex items-center gap-1">
-                            <span>🇮🇷 ترجمه فارسی:</span>
-                            <span id="translation-meta-badge" class="text-[10px] font-bold bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full hidden"></span>
-                        </span>
-                        <button type="button" onclick="copyTranslatedText()" class="text-[11px] text-indigo-600 hover:underline font-bold">
-                            📋 کپی ترجمه
+                    
+                    <!-- نوار پیمایش ترتیبی جملات (اول کل ستون چپ، بعد کل ستون راست) -->
+                    <div class="flex items-center justify-between bg-white px-2.5 py-1.5 rounded-xl border border-slate-200">
+                        <button type="button" onclick="stepSegment(-1)" class="px-2.5 py-1 bg-slate-100 hover:bg-indigo-50 text-slate-700 hover:text-indigo-700 rounded-lg font-extrabold text-[11px] transition">
+                            ❯ جمله / بند قبلی
+                        </button>
+                        <span id="current-seg-Position-label" class="text-[10px] font-extrabold text-indigo-700">---</span>
+                        <button type="button" onclick="stepSegment(1)" class="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg font-extrabold text-[11px] transition">
+                            جمله / بند بعدی ❮
                         </button>
                     </div>
 
-                    <!-- لودینگ ترجمه -->
+                    <!-- نوار کنترل صوتی پیشرفته (TTS Player Bar) -->
+                    <div class="bg-slate-200/75 p-2 rounded-xl flex flex-wrap items-center justify-between gap-1.5">
+                        <div class="flex items-center gap-1">
+                            <button type="button" onclick="playOrResumeSpeech()" id="btn-tts-play" class="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-extrabold text-[11px] flex items-center gap-1 transition shadow-2xs" title="شروع خواندن متن">
+                                <span>▶</span><span>خواندن</span>
+                            </button>
+                            <button type="button" onclick="pauseSpeech()" id="btn-tts-pause" class="hidden px-2 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-lg font-bold text-[11px]" title="مکث موقت">
+                                ⏸
+                            </button>
+                            <button type="button" onclick="stopSpeech()" id="btn-tts-stop" class="hidden px-2 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg font-bold text-[11px]" title="توقف کامل">
+                                ⏹
+                            </button>
+                        </div>
+
+                        <div class="flex items-center gap-1 flex-1 justify-end min-w-[170px]">
+                            <select id="tts-voice-select" onchange="saveTtsPreferences()" dir="ltr" class="max-w-[135px] px-1.5 py-1 bg-white border border-slate-300 rounded-lg text-[10px] font-bold text-slate-700 truncate" title="انتخاب اپراتور و لهجه گوینده">
+                                <option value="">🎙️ گوینده پیش‌فرض</option>
+                            </select>
+                            <select id="tts-rate-select" onchange="saveTtsPreferences()" dir="ltr" class="px-1.5 py-1 bg-white border border-slate-300 rounded-lg text-[10px] font-extrabold text-indigo-700" title="سرعت خواندن">
+                                <option value="0.5">0.5x</option>
+                                <option value="0.75">0.75x</option>
+                                <option value="1" selected>1.0x</option>
+                                <option value="1.25">1.25x</option>
+                                <option value="1.5">1.5x</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <textarea id="source-english-textarea" onmouseup="checkSubSelectionInTextarea()" onkeyup="checkSubSelectionInTextarea()" touchend="checkSubSelectionInTextarea()" dir="ltr" rows="3" placeholder="روی یکی از جملات مقاله کلیک کنید یا هر عبارت انگلیسی را اینجا بنویسید..." class="w-full p-2.5 bg-white border border-slate-200 rounded-xl text-left font-sans text-xs text-slate-800 leading-relaxed focus:outline-none focus:ring-2 focus:ring-indigo-500 select-text"></textarea>
+
+                    <!-- دکمه شناور ترجمه فوری تک‌کلمه یا عبارت انتخاب‌شده در داخل کادر -->
+                    <div id="sub-selection-bar" class="hidden bg-amber-50 border border-amber-300 rounded-xl p-2 flex items-center justify-between gap-2">
+                        <div class="truncate text-[11px] font-bold text-amber-950">
+                            <span>🔍 عبارت انتخابی: </span>
+                            <span id="sub-selection-term" class="font-mono text-indigo-700 dir-ltr"></span>
+                        </div>
+                        <div class="flex items-center gap-1 shrink-0">
+                            <button type="button" onclick="speakSelectedSubstring()" class="px-2 py-1 bg-white border border-amber-300 rounded-lg text-[10px] font-bold" title="تلفظ همین واژه">🔊</button>
+                            <button type="button" onclick="translateSelectedSubstring()" class="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-lg text-[10px] font-extrabold">معنی فوری</button>
+                        </div>
+                    </div>
+
+                    <div id="sub-selection-result" class="hidden bg-indigo-950 text-white p-2.5 rounded-xl text-[11px] flex items-center justify-between gap-2">
+                        <div id="sub-selection-meaning" class="font-bold leading-relaxed"></div>
+                        <button type="button" onclick="document.getElementById('sub-selection-result').classList.add('hidden')" class="text-slate-400 hover:text-white font-bold">&times;</button>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-1.5 pt-0.5">
+                        <button type="button" onclick="runTranslationTask('translate')" class="py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-extrabold text-[11px] transition shadow-2xs">
+                            🔄 ترجمه روان
+                        </button>
+                        <button type="button" onclick="runTranslationTask('summarize')" class="py-2 bg-amber-500/15 hover:bg-amber-500/25 text-amber-900 border border-amber-400/60 rounded-xl font-extrabold text-[11px] transition">
+                            ✨ پیام کلیدی و خلاصه
+                        </button>
+                    </div>
+                </div>
+
+                <!-- کادر خروجی ترجمه فارسی + واژگان تخصصی -->
+                <div class="flex-1 flex flex-col bg-indigo-50/50 rounded-2xl p-3.5 border border-indigo-100 min-h-[180px]">
+                    <div class="flex items-center justify-between border-b border-indigo-100 pb-2 mb-2.5">
+                        <span class="font-extrabold text-indigo-950 text-xs flex items-center gap-1">
+                            <span id="output-box-title">🇮🇷 ترجمه فارسی:</span>
+                            <span id="translation-meta-badge" class="text-[10px] font-bold bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full hidden"></span>
+                        </span>
+                        <button type="button" onclick="copyTranslatedText()" class="text-[11px] text-indigo-600 hover:underline font-bold">
+                            📋 کپی متن
+                        </button>
+                    </div>
+
                     <div id="translation-loading" class="hidden my-auto text-center py-6 space-y-2">
                         <div class="inline-block w-6 h-6 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
-                        <div class="text-indigo-700 font-bold text-xs">در حال ترجمه بند انتخابی...</div>
+                        <div class="text-indigo-700 font-bold text-xs">در حال پردازش علمی متن...</div>
                     </div>
 
-                    <!-- متن ترجمه‌شده -->
                     <div id="translated-persian-output" class="flex-1 text-slate-800 text-xs md:text-sm leading-7 font-medium whitespace-pre-line select-text">
-                        برای شروع، روی هر پاراگراف یا جمله‌ای از مقاله در صفحه مقابل کلیک کنید تا ترجمه فارسی آن اینجا نمایش داده شود.
+                        روی هر جمله از مقاله کلیک کنید تا از نقطه قبلی تا نقطه بعدی استخراج شده و ترجمه فارسی آن اینجا نمایش داده شود.
                     </div>
 
-                    <!-- دکمه ذخیره در فیش‌های مقاله -->
+                    <div id="extracted-keywords-box" class="hidden mt-3 pt-2.5 border-t border-indigo-200/60">
+                        <div class="text-[10px] font-extrabold text-indigo-900 mb-1.5">📖 واژگان و اصطلاحات تخصصی (برای تلفظ کلیک کنید):</div>
+                        <div id="extracted-keywords-list" class="flex flex-wrap gap-1.5"></div>
+                    </div>
+
                     <div id="save-note-action-bar" class="hidden pt-3 mt-3 border-t border-indigo-200/60 space-y-2">
-                        <input type="text" id="note-user-comment" placeholder="یادداشت شخصی شما درباره این بند (اختیاری)..." class="w-full px-2.5 py-1.5 bg-white border border-indigo-200 rounded-xl text-xs">
+                        <input type="text" id="note-user-comment" placeholder="یادداشت شخصی شما درباره این نکته (اختیاری)..." class="w-full px-2.5 py-1.5 bg-white border border-indigo-200 rounded-xl text-xs">
                         <button type="button" onclick="saveCurrentTranslationAsNote()" class="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-extrabold text-xs shadow-xs transition flex items-center justify-center gap-1">
-                            <span>📌 ذخیره این بند و ترجمه در فیش‌های مقاله</span>
+                            <span>📌 ذخیره در فیش‌های مقاله</span>
                         </button>
                     </div>
                 </div>
             </div>
 
             <!-- ========================================== -->
-            <!-- تب ۲: دفترچه فیش‌های ذخیره‌شده مقاله -->
+            <!-- تب ۲: دفترچه فیش‌های مقاله + خروجی Word و PDF -->
             <!-- ========================================== -->
             <div id="panel-tab-notes" class="hidden flex-1 flex-col overflow-hidden p-3.5 text-xs">
-                <div class="flex items-center justify-between pb-2.5 mb-2.5 border-b border-slate-200 shrink-0">
-                    <span class="font-extrabold text-slate-800">📑 فیش‌های پژوهشی این مقاله</span>
-                    <button type="button" onclick="copyAllPaperNotes()" class="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 px-2.5 py-1 rounded-lg font-bold text-[11px]">
-                        📋 کپی یکجای تمام فیش‌ها
-                    </button>
+                <div class="bg-slate-100 p-2.5 rounded-2xl border border-slate-200 mb-2.5 space-y-2 shrink-0">
+                    <div class="flex items-center justify-between">
+                        <span class="font-extrabold text-slate-800 text-[11px]">📥 دانلود و خروجی فیش‌های مقاله:</span>
+                        <button type="button" onclick="copyAllPaperNotes()" class="text-indigo-600 hover:underline font-bold text-[11px]">📋 کپی متنی</button>
+                    </div>
+                    <div class="grid grid-cols-2 gap-1.5">
+                        <button type="button" onclick="exportNotesToWord()" class="py-2 px-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-extrabold text-[11px] flex items-center justify-center gap-1 shadow-2xs transition">
+                            <span>📘 دانلود فایل Word</span>
+                        </button>
+                        <button type="button" onclick="exportNotesToPdfPrint()" class="py-2 px-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl font-extrabold text-[11px] flex items-center justify-center gap-1 shadow-2xs transition">
+                            <span>📕 خروجی PDF / چاپ</span>
+                        </button>
+                    </div>
                 </div>
+
+                <div class="mb-2.5 shrink-0">
+                    <input type="text" id="notes-search-input" oninput="renderPaperNotesList()" placeholder="🔎 جستجو در متن انگلیسی، ترجمه یا یادداشت فیش‌ها..." class="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                </div>
+
                 <div id="paper-notes-list" class="flex-1 overflow-y-auto space-y-2.5 custom-scroll"></div>
             </div>
 
@@ -369,7 +442,7 @@ $initial_sub = function_exists('get_user_subscription_info')
     </main>
 
     <!-- ==================================================== -->
-    <!-- ۳. مودال آپلود مقاله انگلیسی جدید (در پوشه uploads/papers) -->
+    <!-- ۳. مودال آپلود مقاله انگلیسی جدید -->
     <!-- ==================================================== -->
     <div id="upload-paper-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs hidden items-center justify-center p-4 z-50">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
@@ -406,7 +479,7 @@ $initial_sub = function_exists('get_user_subscription_info')
             </div>
             <div class="p-4 space-y-3 text-xs">
                 <p class="text-slate-600 leading-relaxed">
-                    می‌توانید هر یک از فایل‌های PDF که قبلاً در بخش «جزوه‌خوان» آپلود کرده‌اید را با یک کلیک به محیط «مقاله‌خوان» اضافه کنید:
+                    می‌توانید هر یک از فایل‌های PDF موجود در بخش «جزوه‌خوان» را با یک کلیک به محیط «مقاله‌خوان» اضافه کنید:
                 </p>
                 <div id="booklets-import-list" class="max-h-64 overflow-y-auto space-y-2 custom-scroll"></div>
             </div>
@@ -445,7 +518,7 @@ $initial_sub = function_exists('get_user_subscription_info')
                             </div>
                             <ul class="space-y-1.5 text-[11px] text-slate-600 mb-4">
                                 <li>✓ آپلود نامحدود مقاله و جزوه (تا <?php echo VIP_MAX_PDF_MB; ?>MB)</li>
-                                <li>✓ دسترسی به مترجم تخصصی هوش مصنوعی (Academic AI)</li>
+                                <li>✓ دسترسی به مترجم تخصصی هوش مصنوعی و خلاصه‌ساز</li>
                                 <li>✓ فعال‌سازی پیامک یادآوری تقویم کنکور</li>
                             </ul>
                         </div>
@@ -470,7 +543,7 @@ $initial_sub = function_exists('get_user_subscription_info')
                             </div>
                             <ul class="space-y-1.5 text-[11px] text-slate-700 mb-4">
                                 <li>✓ <b>۲۰٪ به‌صرفه‌تر</b> (ماهیانه فقط ۴۰۰ هزار تومان)</li>
-                                <li>✓ مترجم تخصصی هوش مصنوعی + فیش‌برداری نامحدود</li>
+                                <li>✓ مترجم تخصصی هوش مصنوعی + استخراج واژگان و فیش</li>
                                 <li>✓ آپلود نامحدود PDF + پیامک یادآوری تقویم</li>
                             </ul>
                         </div>
@@ -572,9 +645,229 @@ $initial_sub = function_exists('get_user_subscription_info')
         let pendingPaperPage  = null;
         let isPaperDarkMode   = false;
 
-        let selectedEngine    = 'google'; // 'google', 'mymemory', 'ai'
-        let lastTranslatedObj = null;     // { original, translated }
-        let paperNotes        = [];
+        // حالت انتخاب متن: 'sentence' (از نقطه تا نقطه - پیش‌فرض) یا 'paragraph' (پاراگراف هم‌ستون)
+        let selectionGranularity = 'sentence';
+        let pageSegmentsList     = []; // لیست مرتب تمام جملات/بندهای صفحه فعلی (اول ستون چپ، بعد ستون راست)
+        let activeSegmentIndex   = -1;
+
+        let selectedEngine      = 'google'; // 'google', 'mymemory', 'ai'
+        let lastTranslatedObj   = null;     // { original, translated, para_hash }
+        let visitedSegNorms     = new Set();
+        let paperNotes          = [];
+
+        function normalizeClientEnglishText(str) {
+            return String(str || '')
+                .trim()
+                .replace(/(\w)-\s+([a-z])/g, '$1$2')
+                .replace(/\s+/g, ' ')
+                .toLowerCase();
+        }
+
+        // تغییر حالت بین «نقطه تا نقطه (جمله)» و «پاراگراف»
+        function setSelectionGranularity(mode) {
+            selectionGranularity = mode;
+            const btnSent = document.getElementById('mode-btn-sentence');
+            const btnPara = document.getElementById('mode-btn-paragraph');
+            const hintEl  = document.getElementById('granularity-hint-text');
+
+            if (mode === 'sentence') {
+                btnSent.className = 'px-2 py-1 rounded-md font-extrabold bg-indigo-600 text-white transition';
+                btnPara.className = 'px-2 py-1 rounded-md font-bold text-slate-300 hover:text-white transition';
+                hintEl.textContent = '🎯 حالت نقطه تا نقطه: روی هر جمله کلیک کنید تا از نقطه قبلی تا نقطه بعدی ترجمه شود (با تفکیک ستون چپ و راست).';
+            } else {
+                btnPara.className = 'px-2 py-1 rounded-md font-extrabold bg-indigo-600 text-white transition';
+                btnSent.className = 'px-2 py-1 rounded-md font-bold text-slate-300 hover:text-white transition';
+                hintEl.textContent = '📄 حالت پاراگراف: با کلیک روی هر بند، کل آن پاراگراف (با رعایت مرز ستون چپ و راست) انتخاب می‌شود.';
+            }
+
+            if (paperDocInstance) {
+                renderPaperPage(currentPaperPage);
+            }
+        }
+
+        // ====================================================
+        // پلیر صوتی پیشرفته چندگوینده (Multi-Voice & Multi-Speed TTS)
+        // ====================================================
+        let availableEnglishVoices = [];
+
+        function populateVoiceList() {
+            if (!('speechSynthesis' in window)) return;
+            const allVoices = window.speechSynthesis.getVoices() || [];
+            availableEnglishVoices = allVoices.filter(v => /^en(-|_|$)/i.test(v.lang));
+            if (availableEnglishVoices.length === 0) {
+                availableEnglishVoices = allVoices;
+            }
+
+            const selectEl = document.getElementById('tts-voice-select');
+            if (!selectEl) return;
+
+            const savedVoiceURI = localStorage.getItem('paper_tts_voice_uri') || '';
+            let html = '<option value="">🎙️ گوینده پیش‌فرض سیستم</option>';
+
+            availableEnglishVoices.forEach(v => {
+                const cleanName = v.name.replace(/Microsoft |Google |Apple /g, '');
+                const selectedAttr = (v.voiceURI === savedVoiceURI) ? 'selected' : '';
+                html += `<option value="${escapeHtml(v.voiceURI)}" ${selectedAttr}>🎙️ ${escapeHtml(cleanName)} (${escapeHtml(v.lang)})</option>`;
+            });
+            selectEl.innerHTML = html;
+
+            const savedRate = localStorage.getItem('paper_tts_rate') || '1';
+            const rateEl = document.getElementById('tts-rate-select');
+            if (rateEl) rateEl.value = savedRate;
+        }
+
+        if ('speechSynthesis' in window) {
+            populateVoiceList();
+            if (speechSynthesis.onvoiceschanged !== undefined) {
+                speechSynthesis.onvoiceschanged = populateVoiceList;
+            }
+        }
+
+        function saveTtsPreferences() {
+            const vUri = document.getElementById('tts-voice-select').value;
+            const rate = document.getElementById('tts-rate-select').value;
+            localStorage.setItem('paper_tts_voice_uri', vUri);
+            localStorage.setItem('paper_tts_rate', rate);
+
+            if (window.speechSynthesis && window.speechSynthesis.speaking) {
+                stopSpeech();
+                playOrResumeSpeech();
+            }
+        }
+
+        function updateTtsButtonsUI(state) {
+            const btnPlay  = document.getElementById('btn-tts-play');
+            const btnPause = document.getElementById('btn-tts-pause');
+            const btnStop  = document.getElementById('btn-tts-stop');
+
+            if (state === 'playing') {
+                btnPlay.innerHTML = '<span>🔊 در حال خواندن...</span>';
+                btnPause.classList.remove('hidden');
+                btnStop.classList.remove('hidden');
+            } else if (state === 'paused') {
+                btnPlay.innerHTML = '<span>▶ ادامه</span>';
+                btnPause.classList.add('hidden');
+                btnStop.classList.remove('hidden');
+            } else {
+                btnPlay.innerHTML = '<span>▶</span><span>خواندن</span>';
+                btnPause.classList.add('hidden');
+                btnStop.classList.add('hidden');
+            }
+        }
+
+        function speakTextWithCurrentSettings(textToSpeak) {
+            if (!textToSpeak) return;
+            if (!('speechSynthesis' in window)) {
+                alert('مرورگر شما از موتور صوتی پشتیبانی نمی‌کند.');
+                return;
+            }
+
+            window.speechSynthesis.cancel();
+            const utter = new SpeechSynthesisUtterance(textToSpeak);
+            utter.lang = 'en-US';
+
+            const selectedUri = document.getElementById('tts-voice-select')?.value || '';
+            if (selectedUri && availableEnglishVoices.length > 0) {
+                const matchedVoice = availableEnglishVoices.find(v => v.voiceURI === selectedUri);
+                if (matchedVoice) {
+                    utter.voice = matchedVoice;
+                    utter.lang  = matchedVoice.lang || 'en-US';
+                }
+            }
+
+            const rateVal = parseFloat(document.getElementById('tts-rate-select')?.value || '1') || 1.0;
+            utter.rate = rateVal;
+
+            utter.onstart = () => updateTtsButtonsUI('playing');
+            utter.onend   = () => updateTtsButtonsUI('idle');
+            utter.onerror = () => updateTtsButtonsUI('idle');
+
+            window.speechSynthesis.speak(utter);
+        }
+
+        function playOrResumeSpeech() {
+            if (!('speechSynthesis' in window)) return;
+            if (window.speechSynthesis.paused) {
+                window.speechSynthesis.resume();
+                updateTtsButtonsUI('playing');
+                return;
+            }
+            const text = document.getElementById('source-english-textarea').value.trim();
+            if (!text) {
+                alert('ابتدا یک جمله از مقاله را انتخاب کنید.');
+                return;
+            }
+            speakTextWithCurrentSettings(text);
+        }
+
+        function pauseSpeech() {
+            if ('speechSynthesis' in window && window.speechSynthesis.speaking) {
+                window.speechSynthesis.pause();
+                updateTtsButtonsUI('paused');
+            }
+        }
+
+        function stopSpeech() {
+            if ('speechSynthesis' in window) {
+                window.speechSynthesis.cancel();
+                updateTtsButtonsUI('idle');
+            }
+        }
+
+        // ====================================================
+        // تشخیص انتخاب تک‌کلمه یا عبارت کوتاه در کادر انگلیسی
+        // ====================================================
+        let selectedSubstringText = '';
+
+        function checkSubSelectionInTextarea() {
+            const ta = document.getElementById('source-english-textarea');
+            const bar = document.getElementById('sub-selection-bar');
+            if (!ta || !bar) return;
+
+            const start = ta.selectionStart;
+            const end   = ta.selectionEnd;
+            const sub   = ta.value.substring(start, end).trim();
+
+            if (sub.length >= 2 && sub.length <= 80 && sub.length < ta.value.trim().length) {
+                selectedSubstringText = sub;
+                document.getElementById('sub-selection-term').textContent = sub;
+                bar.classList.remove('hidden');
+            } else {
+                bar.classList.add('hidden');
+            }
+        }
+
+        function speakSelectedSubstring() {
+            if (selectedSubstringText) {
+                speakTextWithCurrentSettings(selectedSubstringText);
+            }
+        }
+
+        async function translateSelectedSubstring() {
+            if (!selectedSubstringText) return;
+            const resBox = document.getElementById('sub-selection-result');
+            const meanEl = document.getElementById('sub-selection-meaning');
+            resBox.classList.remove('hidden');
+            meanEl.textContent = `⏳ در حال ترجمه «${selectedSubstringText}»...`;
+
+            try {
+                const fd = new FormData();
+                fd.append('action', 'translate');
+                fd.append('text', selectedSubstringText);
+                fd.append('engine', selectedEngine);
+                fd.append('task_mode', 'translate');
+
+                const res = await fetch('api_translate.php', { method: 'POST', body: fd });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    meanEl.innerHTML = `<span class="text-amber-300 font-mono dir-ltr">${escapeHtml(selectedSubstringText)}</span>: ${escapeHtml(data.translated_text)}`;
+                } else {
+                    meanEl.textContent = data.message || 'خطا در ترجمه عبارت.';
+                }
+            } catch (e) {
+                meanEl.textContent = 'خطا در ارتباط با سرور.';
+            }
+        }
 
         // ====================================================
         // دریافت لیست مقالات و جزوات از سرور
@@ -610,16 +903,14 @@ $initial_sub = function_exists('get_user_subscription_info')
                 }
             }
 
-            // اگر موتور هوش مصنوعی در config.php غیرفعال شده باشد و کاربر کلید شخصی هم نداده باشد، دکمه AI مخفی یا اطلاع‌رسانی شود
             const aiBtn = document.getElementById('eng-btn-ai');
-            const customKey = localStorage.getItem('user_custom_ai_key') || '';
             if (aiBtn) {
-                if (!aiConfig.enabled && !customKey) {
+                if (!aiConfig.enabled) {
                     aiBtn.classList.add('opacity-50');
-                    document.getElementById('ai-engine-sublabel').textContent = 'نیاز به کلید 🔑';
+                    document.getElementById('ai-engine-sublabel').textContent = 'غیرفعال';
                 } else {
                     aiBtn.classList.remove('opacity-50');
-                    document.getElementById('ai-engine-sublabel').textContent = customKey ? '🔑 کلید شخصی' : (userSub.is_vip ? '✨ فعال (VIP)' : '🔒 ویژه VIP');
+                    document.getElementById('ai-engine-sublabel').textContent = userSub.is_vip ? '✨ فعال (VIP)' : '🔒 ویژه VIP';
                 }
             }
         }
@@ -661,7 +952,7 @@ $initial_sub = function_exists('get_user_subscription_info')
         }
 
         // ====================================================
-        // بارگذاری باینری مقاله و استخراج هوشمند بلوک‌های پاراگراف
+        // بارگذاری باینری مقاله
         // ====================================================
         async function loadAndOpenPaper(pdfId, targetPage = null) {
             if (papersList.length === 0) await fetchPapersAndConfig();
@@ -674,6 +965,7 @@ $initial_sub = function_exists('get_user_subscription_info')
             }
 
             activePaperMeta = target;
+            visitedSegNorms.clear();
             closePaperSidebarMobile();
 
             document.getElementById('active-paper-title').textContent = activePaperMeta.title;
@@ -739,7 +1031,7 @@ $initial_sub = function_exists('get_user_subscription_info')
                 document.getElementById('paper-hint-bar').classList.add('flex');
 
                 renderPapersSidebar();
-                fetchPaperNotes(activePaperMeta.id);
+                await fetchPaperNotes(activePaperMeta.id);
                 await renderPaperPage(currentPaperPage);
             } catch (err) {
                 document.getElementById('paper-loading-overlay').classList.add('hidden');
@@ -812,10 +1104,7 @@ $initial_sub = function_exists('get_user_subscription_info')
 
                 document.getElementById('paper-page-input').value = num;
 
-                // استخراج متن و ساخت باکس‌های تعاملی پاراگراف‌ها روی صفحه
-                await buildInteractiveParagraphBlocks(page, viewport);
-
-                // ذخیره آخرین صفحه مطالعه‌شده در دیتابیس
+                await buildInteractiveSegments(page, viewport);
                 savePaperProgress(activePaperMeta.id, num, paperDocInstance.numPages);
             } catch (err) {
                 if (err && err.name !== 'RenderingCancelledException') {
@@ -832,74 +1121,185 @@ $initial_sub = function_exists('get_user_subscription_info')
         }
 
         // ====================================================
-        // الگوریتم خوشه‌بندی هوشمند سطرها به پاراگراف (پشتیبانی از مقالات ۱ و ۲ ستونه)
+        // موتور جدید: تفکیک قطعی ستون چپ/راست + برش هوشمند «از نقطه تا نقطه» (Dot-to-Dot)
         // ====================================================
-        async function buildInteractiveParagraphBlocks(page, viewport) {
+
+        // تشخیص اینکه آیا یک نقطه (.) واقعاً پایان جمله است یا بخشی از اختصارات علمی (et al., Fig., Eq., 3.14)
+        function isTrueSentenceEnd(lineText, dotIndex) {
+            const ch = lineText[dotIndex];
+            if (ch === '?' || ch === '!') return true;
+
+            const afterChar = lineText[dotIndex + 1] || '';
+            // اگر بلافاصله بعد از نقطه عدد یا حرف بدون فاصله باشد (مثل 3.14 یا e.g.)، پایان جمله نیست
+            if (afterChar && !/[\s"'\)\]\}]/.test(afterChar)) {
+                return false;
+            }
+
+            // استخراج کلمه قبل از نقطه
+            const beforeStr = lineText.slice(0, dotIndex).trimEnd();
+            const wordMatch = beforeStr.match(/([a-zA-Z0-9\.]+)$/);
+            if (!wordMatch) return true;
+
+            const lastWord = wordMatch[1];
+            const cleanWord = lastWord.replace(/\./g, '').toLowerCase();
+
+            // لیست اختصارات رایج در مقالات علمی که نقطه آن‌ها نباید جمله را بشکند
+            const academicAbbrevs = new Set([
+                'fig', 'figs', 'eq', 'eqs', 'sec', 'secs', 'tab', 'tabs', 'ref', 'refs',
+                'al', 'eg', 'ie', 'vs', 'etc', 'dr', 'prof', 'mr', 'mrs', 'ms', 'inc',
+                'ltd', 'co', 'no', 'nos', 'vol', 'vols', 'pp', 'ch', 'st', 'ave', 'approx',
+                'dept', 'univ', 'assn', 'proc', 'trans', 'conf', 'symp', 'intl', 'jan',
+                'feb', 'mar', 'apr', 'jun', 'jul', 'aug', 'sep', 'sept', 'oct', 'nov', 'dec'
+            ]);
+
+            if (academicAbbrevs.has(cleanWord)) return false;
+
+            // اگر حرف تکی بزرگ باشد (مثل حرف اول اسم در رفرنس‌ها: J. Smith)
+            if (/^[A-Z]$/.test(lastWord)) return false;
+
+            // اگر شامل نقطه درونی باشد مثل e.g یا i.e
+            if (lastWord.includes('.')) return false;
+
+            return true;
+        }
+
+        // شکستن یک سطر به قطعات جمله‌ای بر اساس محل دقیق نقطه‌ها
+        function splitLineIntoSentencePieces(ln) {
+            const text = ln.text;
+            const len  = text.length;
+            if (len === 0) return [];
+
+            const splitIndices = [];
+            for (let i = 0; i < len; i++) {
+                const c = text[i];
+                if (c === '.' || c === '?' || c === '!') {
+                    if (isTrueSentenceEnd(text, i)) {
+                        // شامل کردن پرانتز یا گیومه یا رفرنس بسته بعد از نقطه مثل .[12] یا .)
+                        let endPos = i + 1;
+                        while (endPos < len && /[\)"'\]\}]/.test(text[endPos])) {
+                            endPos++;
+                        }
+                        splitIndices.push(endPos);
+                        i = endPos - 1;
+                    }
+                }
+            }
+
+            const pieces = [];
+            let startIdx = 0;
+            const totalW = Math.max(10, ln.right - ln.x);
+
+            splitIndices.forEach(endIdx => {
+                const subStr = text.slice(startIdx, endIdx).trim();
+                if (subStr.length > 0) {
+                    const ratioStart = startIdx / len;
+                    const ratioEnd   = endIdx / len;
+                    pieces.push({
+                        text: subStr,
+                        endsSentence: true,
+                        x: ln.x + (totalW * ratioStart),
+                        y: ln.y,
+                        w: Math.max(12, totalW * (ratioEnd - ratioStart)),
+                        h: Math.max(10, ln.bottom - ln.y)
+                    });
+                }
+                startIdx = endIdx;
+                while (startIdx < len && text[startIdx] === ' ') startIdx++;
+            });
+
+            if (startIdx < len) {
+                const remStr = text.slice(startIdx).trim();
+                if (remStr.length > 0) {
+                    const ratioStart = startIdx / len;
+                    pieces.push({
+                        text: remStr,
+                        endsSentence: false,
+                        x: ln.x + (totalW * ratioStart),
+                        y: ln.y,
+                        w: Math.max(12, totalW * (1 - ratioStart)),
+                        h: Math.max(10, ln.bottom - ln.y)
+                    });
+                }
+            }
+
+            return pieces;
+        }
+
+        async function buildInteractiveSegments(page, viewport) {
             const paraLayer = document.getElementById('paper-paragraphs-layer');
             paraLayer.innerHTML = '';
+            pageSegmentsList = [];
+            activeSegmentIndex = -1;
 
             const textContent = await page.getTextContent();
             const rawItems = textContent.items || [];
-            const fragments = [];
+            const pageW = viewport.width;
+            const pageH = viewport.height;
+            const centerX = pageW * 0.50;
 
+            // گام ۱: استخراج قطعات خام متن؛ اگر یک آیتم PDF خودش شامل فاصله بزرگ افقی در وسط صفحه بود، از ورود به شکاف جلوگیری شود
+            const fragments = [];
             rawItems.forEach(item => {
                 const str = (item.str || '').trim();
                 if (!str) return;
 
                 const tx = window.pdfjsLib.Util.transform(viewport.transform, item.transform);
-                const fontHeight = Math.max(8, Math.hypot(tx[2], tx[3]));
+                const fontHeight = Math.max(7.5, Math.hypot(tx[2], tx[3]));
                 const x = tx[4];
                 const y = tx[5] - fontHeight;
-                const w = Math.max(fontHeight * 0.5, (item.width || 0) * viewport.scale);
+                const w = Math.max(fontHeight * 0.4, (item.width || 0) * viewport.scale);
                 const h = fontHeight * 1.18;
 
-                if (x >= -10 && y >= -10 && x <= viewport.width + 10 && y <= viewport.height + 10) {
+                if (x >= -10 && y >= -10 && x <= pageW + 10 && y <= pageH + 10) {
                     fragments.push({
                         str: item.str,
                         x: x,
                         y: y,
                         right: x + w,
                         bottom: y + h,
-                        w: w,
-                        h: h,
                         fontH: fontHeight
                     });
                 }
             });
 
             if (fragments.length === 0) {
-                document.getElementById('detected-blocks-badge').textContent = 'صفحه تصویری (اسکن‌شده)';
+                document.getElementById('detected-blocks-badge').textContent = 'صفحه تصویری';
                 return;
             }
 
-            // گام ۱: مرتب‌سازی قطعات متن از بالا به پایین و از چپ به راست
-            fragments.sort((a, b) => (Math.abs(a.y - b.y) <= Math.min(a.fontH, b.fontH) * 0.45) ? (a.x - b.x) : (a.y - b.y));
+            // مرتب‌سازی اولیه قطعات بر اساس سطر (Y) و سپس چپ‌به‌راست (X)
+            fragments.sort((a, b) => (Math.abs(a.y - b.y) <= Math.min(a.fontH, b.fontH) * 0.42) ? (a.x - b.x) : (a.y - b.y));
 
-            // گام ۲: ترکیب قطعات هم‌تراز در یک سطر (با رعایت فاصله افقی برای عدم ادغام دو ستون مقاله!)
+            // گام ۲: تشکیل سطرها با قانون سخت‌گیرانه عدم عبور از شکاف وسط صفحه (Gutter)
+            // فاصله مجاز بین دو کلمه در یک سطر حداکثر 1.45 برابر ارتفاع فونت است (هرگز دو ستون چپ و راست به هم نمی‌چسبند!)
             const lines = [];
-            const maxHorizGapInLine = viewport.width * 0.055;
-
             fragments.forEach(frag => {
-                let addedToLine = false;
-                for (let i = lines.length - 1; i >= Math.max(0, lines.length - 6); i--) {
+                let added = false;
+                for (let i = lines.length - 1; i >= Math.max(0, lines.length - 8); i--) {
                     const ln = lines[i];
-                    const sameVertical = Math.abs(frag.y - ln.y) <= Math.min(frag.fontH, ln.fontH) * 0.55;
+                    const avgFont = (ln.fontH + frag.fontH) * 0.5;
+                    const sameVertical = Math.abs(frag.y - ln.y) <= avgFont * 0.50;
                     const horizGap = frag.x - ln.right;
 
-                    if (sameVertical && horizGap >= -15 && horizGap <= maxHorizGapInLine) {
-                        const needSpace = (horizGap > ln.fontH * 0.12 && !ln.text.endsWith(' ') && !frag.str.startsWith(' '));
+                    // شرط طلایی جلوگیری از اتصال ستون چپ به ستون راست:
+                    // ۱. فاصله افقی نباید بیشتر از 1.45 برابر سایز فونت باشد
+                    // ۲. اگر قطعه قبلی در سمت چپ خط وسط صفحه تمام شده و قطعه جدید در سمت راست خط وسط شروع شده و بینشان بیش از 0.65*avgFont فاصله است، قطعاً ستون جدید است!
+                    const crossesCenterGutter = (ln.right <= pageW * 0.515 && frag.x >= pageW * 0.485 && horizGap > avgFont * 0.65);
+
+                    if (sameVertical && !crossesCenterGutter && horizGap >= -12 && horizGap <= avgFont * 1.45) {
+                        const needSpace = (horizGap > avgFont * 0.12 && !ln.text.endsWith(' ') && !frag.str.startsWith(' '));
                         ln.text += (needSpace ? ' ' : '') + frag.str;
                         ln.x = Math.min(ln.x, frag.x);
                         ln.y = Math.min(ln.y, frag.y);
                         ln.right = Math.max(ln.right, frag.right);
                         ln.bottom = Math.max(ln.bottom, frag.bottom);
-                        ln.fontH = (ln.fontH + frag.fontH) / 2;
-                        addedToLine = true;
+                        ln.fontH = avgFont;
+                        added = true;
                         break;
                     }
                 }
 
-                if (!addedToLine) {
+                if (!added) {
                     lines.push({
                         text: frag.str,
                         x: frag.x,
@@ -911,101 +1311,283 @@ $initial_sub = function_exists('get_user_subscription_info')
                 }
             });
 
-            // گام ۳: گروه‌بندی سطرهای هم‌ستون در «بلوک‌های پاراگراف»
+            // گام ۳: تشخیص ناحیه هر سطر (تمام‌عرض بالا/چکیده، ستون چپ، ستون راست)
+            // یک سطر فقط زمانی «تمام‌عرض (Full-Width)» است که واقعاً از چپ صفحه شروع شده و از وسط صفحه به اندازه قابل توجهی رد شده باشد (مثل عنوان مقاله یا چکیده تک‌ستونه)
+            lines.forEach(ln => {
+                const lineW = ln.right - ln.x;
+                const spansAcrossCenter = (ln.x < pageW * 0.38 && ln.right > pageW * 0.62 && lineW > pageW * 0.44);
+                if (spansAcrossCenter) {
+                    ln.colZone = 'full';
+                } else {
+                    const lineMidX = (ln.x + ln.right) * 0.5;
+                    ln.colZone = (lineMidX < centerX) ? 'left' : 'right';
+                }
+            });
+
+            // مرتب‌سازی سطرها به ترتیب صحیح مطالعه مقاله علمی:
+            // ۱. بخش تمام‌عرض بالای صفحه (عنوان و چکیده بالای ستون‌ها)
+            // ۲. کل ستون سمت چپ (از بالا به پایین)
+            // ۳. کل ستون سمت راست (از بالا به پایین)
+            // ۴. بخش تمام‌عرض پایین صفحه (در صورت وجود پاورقی سرتاسری)
+            const splitColumnLines = lines.filter(l => l.colZone === 'left' || l.colZone === 'right');
+            const firstTwoColY = splitColumnLines.length > 0 ? Math.min(...splitColumnLines.map(l => l.y)) : pageH;
+
+            function getReadingZoneOrder(ln) {
+                if (ln.colZone === 'full') {
+                    return (ln.y < firstTwoColY + 25) ? 0 : 3;
+                }
+                return (ln.colZone === 'left') ? 1 : 2;
+            }
+
             lines.sort((a, b) => {
-                // تفکیک ستون چپ و راست در مقالات دو ستونه
-                const colA = (a.x > viewport.width * 0.46) ? 1 : 0;
-                const colB = (b.x > viewport.width * 0.46) ? 1 : 0;
-                if (colA !== colB) return colA - colB;
+                const zA = getReadingZoneOrder(a);
+                const zB = getReadingZoneOrder(b);
+                if (zA !== zB) return zA - zB;
                 return a.y - b.y;
             });
 
+            // گام ۴: تشکیل پاراگراف‌ها در داخل هر ستون به صورت کاملاً ایزوله
             const paragraphs = [];
             lines.forEach(ln => {
-                const cleanLineText = ln.text.trim();
-                if (!cleanLineText) return;
+                const cleanTxt = ln.text.trim();
+                if (!cleanTxt) return;
 
                 let merged = false;
                 if (paragraphs.length > 0) {
                     const prev = paragraphs[paragraphs.length - 1];
-                    const verticalGap = ln.y - prev.bottom;
-                    const maxAllowedVertGap = Math.max(prev.fontH, ln.fontH) * 0.85;
+                    const lastLine = prev.lines[prev.lines.length - 1];
 
-                    // بررسی هم‌ستون بودن و مشابه بودن سایز فونت (جلوگیری از ادغام تیتر با پاراگراف)
-                    const overlapLeft  = Math.max(prev.x, ln.x);
-                    const overlapRight = Math.min(prev.right, ln.right);
-                    const hasHorizOverlap = (overlapRight - overlapLeft) > Math.min(prev.right - prev.x, ln.right - ln.x) * 0.25;
-                    const leftAlignedClose = Math.abs(prev.x - ln.x) <= viewport.width * 0.08;
-                    const similarFont = Math.abs(prev.fontH - ln.fontH) <= 2.2;
+                    // دو سطر فقط اگر در یک ستون یکسان باشند اجازه بررسی ادغام دارند!
+                    if (prev.colZone === ln.colZone) {
+                        const vertGap = ln.y - lastLine.bottom;
+                        const maxFont = Math.max(lastLine.fontH, ln.fontH);
+                        const tightVert = (vertGap >= -5 && vertGap <= maxFont * 0.68);
+                        const sameFont  = Math.abs(lastLine.fontH - ln.fontH) <= 1.6;
 
-                    if (verticalGap >= -6 && verticalGap <= maxAllowedVertGap && (hasHorizOverlap || leftAlignedClose) && similarFont) {
-                        // اگر سطر قبلی با خط تیره تمام شده، خط تیره را حذف و کلمه را بچسبان
-                        if (prev.text.endsWith('-')) {
-                            prev.text = prev.text.slice(0, -1) + cleanLineText;
-                        } else {
-                            prev.text += ' ' + cleanLineText;
+                        // تشخیص پایان پاراگراف قبلی (اگر سطر قبلی کوتاه‌تر از انتهای ستون تمام شده و نقطه دارد)
+                        const prevLineW = lastLine.right - lastLine.x;
+                        const paraMaxW  = Math.max(prevLineW, prev.maxRight - prev.minLeft);
+                        const prevEndedShort = (paraMaxW > maxFont * 8) && (lastLine.right < prev.maxRight - maxFont * 2.2) && /[.?!:]$/.test(lastLine.text.trim());
+
+                        // تشخیص تورفتگی سطر اول پاراگراف جدید (First-line indent)
+                        const hasNewIndent = (prev.lines.length >= 2) && (ln.x > prev.minLeft + maxFont * 0.85);
+
+                        // تشخیص سرتیترهای شماره‌دار مثل "1. Introduction" یا "II. METHODOLOGY"
+                        const isSectionHeader = /^(\d+(\.\d+)*|[IVX]+\.)\s+[A-Z]/.test(cleanTxt) && cleanTxt.length < 65;
+
+                        if (tightVert && sameFont && !prevEndedShort && !hasNewIndent && !isSectionHeader) {
+                            prev.lines.push(ln);
+                            prev.minLeft  = Math.min(prev.minLeft, ln.x);
+                            prev.maxRight = Math.max(prev.maxRight, ln.right);
+                            merged = true;
                         }
-                        prev.x = Math.min(prev.x, ln.x);
-                        prev.y = Math.min(prev.y, ln.y);
-                        prev.right = Math.max(prev.right, ln.right);
-                        prev.bottom = Math.max(prev.bottom, ln.bottom);
-                        merged = true;
                     }
                 }
 
                 if (!merged) {
                     paragraphs.push({
-                        text: cleanLineText,
-                        x: ln.x,
-                        y: ln.y,
-                        right: ln.right,
-                        bottom: ln.bottom,
-                        fontH: ln.fontH
+                        colZone: ln.colZone,
+                        minLeft: ln.x,
+                        maxRight: ln.right,
+                        lines: [ln]
                     });
                 }
             });
 
-            // گام ۴: رندر باکس‌های قابل کلیک روی صفحه مقاله
-            let validCount = 0;
-            paragraphs.forEach((p, idx) => {
-                if (p.text.length < 3) return;
-                validCount++;
+            // گام ۵: ساخت واحدهای نهایی قابل کلیک بر اساس حالت انتخابی کاربر (نقطه تا نقطه vs پاراگراف)
+            if (selectionGranularity === 'paragraph') {
+                paragraphs.forEach(para => {
+                    let combinedText = '';
+                    const boxes = [];
+                    para.lines.forEach(ln => {
+                        const t = ln.text.trim();
+                        if (combinedText.endsWith('-')) {
+                            combinedText = combinedText.slice(0, -1) + t;
+                        } else {
+                            combinedText += (combinedText ? ' ' : '') + t;
+                        }
+                        boxes.push({
+                            x: ln.x,
+                            y: ln.y,
+                            w: Math.max(14, ln.right - ln.x),
+                            h: Math.max(10, ln.bottom - ln.y)
+                        });
+                    });
+                    if (combinedText.length >= 3) {
+                        pageSegmentsList.push({
+                            text: combinedText,
+                            colZone: para.colZone,
+                            boxes: boxes
+                        });
+                    }
+                });
+            } else {
+                // حالت پیش‌فرض: از نقطه قبلی تا نقطه بعدی (Sentence-by-Sentence)
+                paragraphs.forEach(para => {
+                    let currentSentText = '';
+                    let currentSentBoxes = [];
 
-                const div = document.createElement('div');
-                div.className = 'para-hotspot';
-                const pad = 3;
-                div.style.left   = Math.max(0, Math.floor(p.x - pad)) + 'px';
-                div.style.top    = Math.max(0, Math.floor(p.y - pad)) + 'px';
-                div.style.width  = Math.floor((p.right - p.x) + (pad * 2)) + 'px';
-                div.style.height = Math.floor((p.bottom - p.y) + (pad * 2)) + 'px';
-                div.title = 'کلیک برای ترجمه فارسی این بند';
+                    para.lines.forEach(ln => {
+                        const pieces = splitLineIntoSentencePieces(ln);
+                        pieces.forEach(pc => {
+                            if (currentSentText.endsWith('-')) {
+                                currentSentText = currentSentText.slice(0, -1) + pc.text;
+                            } else {
+                                currentSentText += (currentSentText ? ' ' : '') + pc.text;
+                            }
+                            currentSentBoxes.push({
+                                x: pc.x,
+                                y: pc.y,
+                                w: pc.w,
+                                h: pc.h
+                            });
 
-                div.onclick = (e) => {
-                    e.stopPropagation();
-                    document.querySelectorAll('.para-hotspot').forEach(el => el.classList.remove('active-para'));
-                    div.classList.add('active-para');
-                    onParagraphSelected(p.text);
-                };
+                            if (pc.endsSentence) {
+                                if (currentSentText.trim().length >= 3) {
+                                    pageSegmentsList.push({
+                                        text: currentSentText.trim(),
+                                        colZone: para.colZone,
+                                        boxes: currentSentBoxes
+                                    });
+                                }
+                                currentSentText = '';
+                                currentSentBoxes = [];
+                            }
+                        });
+                    });
 
-                paraLayer.appendChild(div);
+                    // اگر در انتهای پاراگراف متنی باقی مانده بود (مثلاً عنوان بدون نقطه)
+                    if (currentSentText.trim().length >= 3 && currentSentBoxes.length > 0) {
+                        pageSegmentsList.push({
+                            text: currentSentText.trim(),
+                            colZone: para.colZone,
+                            boxes: currentSentBoxes
+                        });
+                    }
+                });
+            }
+
+            // گام ۶: رندر باکس‌های تعاملی روی صفحه PDF
+            pageSegmentsList.forEach((seg, segIdx) => {
+                const normStr = normalizeClientEnglishText(seg.text);
+                seg.normText = normStr;
+
+                seg.boxes.forEach((bx, bIdx) => {
+                    const div = document.createElement('div');
+                    div.className = 'seg-box';
+                    div.dataset.segIdx = String(segIdx);
+                    if (bIdx === 0) div.dataset.isFirstBox = '1';
+
+                    div.style.left   = Math.max(0, Math.floor(bx.x - 1)) + 'px';
+                    div.style.top    = Math.max(0, Math.floor(bx.y - 1)) + 'px';
+                    div.style.width  = Math.floor(bx.w + 2) + 'px';
+                    div.style.height = Math.floor(bx.h + 2) + 'px';
+
+                    if (visitedSegNorms.has(normStr)) {
+                        div.classList.add('read-seg');
+                    }
+
+                    // وقتی موس روی هر تکه از یک جمله می‌رود، تمام تکه‌های همان جمله هایلایت شوند
+                    div.onmouseenter = () => {
+                        document.querySelectorAll(`.seg-box[data-seg-idx="${segIdx}"]`).forEach(el => el.classList.add('hover-seg'));
+                    };
+                    div.onmouseleave = () => {
+                        document.querySelectorAll(`.seg-box[data-seg-idx="${segIdx}"]`).forEach(el => el.classList.remove('hover-seg'));
+                    };
+
+                    div.onclick = (e) => {
+                        e.stopPropagation();
+                        activateSegmentByIndex(segIdx);
+                    };
+
+                    paraLayer.appendChild(div);
+                });
             });
 
-            document.getElementById('detected-blocks-badge').textContent = `${validCount} بند قابل کلیک`;
+            refreshNotedSegmentsHighlight();
+            const unitLabel = (selectionGranularity === 'sentence') ? 'جمله (از نقطه تا نقطه)' : 'پاراگراف';
+            document.getElementById('detected-blocks-badge').textContent = `${pageSegmentsList.length} ${unitLabel}`;
+            updateSegmentPositionLabel();
+        }
+
+        // فعال‌سازی و ترجمه یک جمله/بند با شماره ایندکس (پشتیبانی از کلیک و دکمه‌های جمله قبل/بعد)
+        function activateSegmentByIndex(segIdx) {
+            if (segIdx < 0 || segIdx >= pageSegmentsList.length) return;
+            activeSegmentIndex = segIdx;
+            const seg = pageSegmentsList[segIdx];
+
+            document.querySelectorAll('.seg-box').forEach(el => el.classList.remove('active-seg'));
+            const matchingBoxes = document.querySelectorAll(`.seg-box[data-seg-idx="${segIdx}"]`);
+            matchingBoxes.forEach(el => {
+                el.classList.add('active-seg', 'read-seg');
+            });
+
+            if (matchingBoxes.length > 0) {
+                matchingBoxes[0].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+
+            visitedSegNorms.add(seg.normText);
+            updateSegmentPositionLabel();
+            onSegmentSelected(seg.text);
+        }
+
+        function stepSegment(delta) {
+            if (pageSegmentsList.length === 0) return;
+            let nextIdx = activeSegmentIndex + delta;
+            if (activeSegmentIndex === -1) nextIdx = 0;
+            if (nextIdx >= 0 && nextIdx < pageSegmentsList.length) {
+                activateSegmentByIndex(nextIdx);
+            }
+        }
+
+        function updateSegmentPositionLabel() {
+            const lbl = document.getElementById('current-seg-Position-label');
+            if (!lbl) return;
+            if (pageSegmentsList.length === 0 || activeSegmentIndex === -1) {
+                lbl.textContent = `0 از ${pageSegmentsList.length}`;
+                return;
+            }
+            const seg = pageSegmentsList[activeSegmentIndex];
+            const zoneTitle = seg.colZone === 'left' ? 'ستون چپ' : (seg.colZone === 'right' ? 'ستون راست' : 'تک‌ستون');
+            lbl.textContent = `جمله ${activeSegmentIndex + 1} از ${pageSegmentsList.length} (${zoneTitle})`;
+        }
+
+        function refreshNotedSegmentsHighlight() {
+            const pageNotesNorms = new Set(
+                paperNotes
+                    .filter(n => Number(n.page_number) === Number(currentPaperPage))
+                    .map(n => normalizeClientEnglishText(n.original_text))
+            );
+
+            document.querySelectorAll('.seg-box').forEach(el => {
+                const idx = Number(el.dataset.segIdx);
+                const seg = pageSegmentsList[idx];
+                const norm = seg ? seg.normText : '';
+                if (norm && pageNotesNorms.has(norm)) {
+                    el.classList.add('noted-seg');
+                    if (el.dataset.isFirstBox === '1') el.classList.add('noted-seg-first');
+                } else {
+                    el.classList.remove('noted-seg', 'noted-seg-first');
+                }
+            });
         }
 
         // ====================================================
-        // اجرای ترجمه هنگام کلیک روی هر بند از مقاله
+        // اجرای ترجمه یا خلاصه‌سازی علمی جمله انتخاب‌شده
         // ====================================================
-        function onParagraphSelected(englishText) {
+        function onSegmentSelected(englishText) {
+            stopSpeech();
             const textarea = document.getElementById('source-english-textarea');
             textarea.value = englishText;
+            document.getElementById('sub-selection-bar').classList.add('hidden');
+            document.getElementById('sub-selection-result').classList.add('hidden');
 
             switchTranslatorTab('translate');
             if (window.innerWidth < 768) {
                 openMobileTranslatorSheet();
             }
 
-            translateCurrentSourceText();
+            runTranslationTask('translate');
         }
 
         function selectTranslationEngine(engine) {
@@ -1020,27 +1602,31 @@ $initial_sub = function_exists('get_user_subscription_info')
                 }
             });
 
-            // اگر متنی در کادر وجود دارد، بلافاصله با موتور جدید ترجمه شود
             const currentTxt = document.getElementById('source-english-textarea').value.trim();
             if (currentTxt) {
-                translateCurrentSourceText();
+                runTranslationTask('translate');
             }
         }
 
-        async function translateCurrentSourceText() {
+        async function runTranslationTask(taskMode = 'translate') {
             const sourceText = document.getElementById('source-english-textarea').value.trim();
             if (!sourceText) {
-                alert('لطفاً ابتدا روی یکی از بندهای مقاله کلیک کنید یا متنی را در کادر انگلیسی بنویسید.');
+                alert('لطفاً ابتدا روی یکی از جملات مقاله کلیک کنید یا متنی را در کادر انگلیسی بنویسید.');
                 return;
             }
 
             const loadingEl = document.getElementById('translation-loading');
             const outputEl  = document.getElementById('translated-persian-output');
+            const titleEl   = document.getElementById('output-box-title');
             const metaBadge = document.getElementById('translation-meta-badge');
+            const kwBox     = document.getElementById('extracted-keywords-box');
+            const kwList    = document.getElementById('extracted-keywords-list');
             const saveBar   = document.getElementById('save-note-action-bar');
 
+            titleEl.textContent = (taskMode === 'summarize') ? '✨ پیام کلیدی و خلاصه علمی:' : '🇮🇷 ترجمه فارسی:';
             loadingEl.classList.remove('hidden');
             outputEl.classList.add('hidden');
+            kwBox.classList.add('hidden');
             saveBar.classList.add('hidden');
             metaBadge.classList.add('hidden');
 
@@ -1049,14 +1635,7 @@ $initial_sub = function_exists('get_user_subscription_info')
                 fd.append('action', 'translate');
                 fd.append('text', sourceText);
                 fd.append('engine', selectedEngine);
-
-                // ارسال کلید شخصی کاربر در صورتی که در مرورگرش ذخیره کرده باشد
-                const customKey  = localStorage.getItem('user_custom_ai_key') || '';
-                const customProv = localStorage.getItem('user_custom_ai_provider') || 'gemini';
-                if (customKey) {
-                    fd.append('custom_api_key', customKey);
-                    fd.append('custom_provider', customProv);
-                }
+                fd.append('task_mode', taskMode);
 
                 const res = await fetch('api_translate.php', { method: 'POST', body: fd });
                 const data = await res.json();
@@ -1068,11 +1647,25 @@ $initial_sub = function_exists('get_user_subscription_info')
                     outputEl.textContent = data.translated_text;
                     lastTranslatedObj = {
                         original: data.clean_source || sourceText,
-                        translated: data.translated_text
+                        translated: data.translated_text,
+                        para_hash: data.para_hash || ''
                     };
 
                     metaBadge.textContent = `${data.engine_used}${data.cached ? ' • کش فوری ⚡' : ''}`;
                     metaBadge.classList.remove('hidden');
+
+                    if (Array.isArray(data.keywords) && data.keywords.length > 0) {
+                        kwList.innerHTML = data.keywords.map(kw => `
+                            <button type="button" onclick="speakTextWithCurrentSettings('${escapeHtml(kw.en)}')" class="px-2 py-1 bg-white hover:bg-indigo-100 border border-indigo-200 rounded-lg text-[10px] font-bold text-slate-800 flex items-center gap-1 transition shadow-2xs" title="کلیک برای تلفظ صوتی">
+                                <span class="text-indigo-700 font-mono dir-ltr">${escapeHtml(kw.en)}</span>
+                                <span class="text-slate-400">:</span>
+                                <span>${escapeHtml(kw.fa)}</span>
+                                <span class="text-[9px] opacity-70">🔊</span>
+                            </button>
+                        `).join('');
+                        kwBox.classList.remove('hidden');
+                    }
+
                     if (activePaperMeta) {
                         saveBar.classList.remove('hidden');
                     }
@@ -1080,7 +1673,7 @@ $initial_sub = function_exists('get_user_subscription_info')
                     outputEl.textContent = data.message;
                     openSubscriptionModal(data.message);
                 } else {
-                    outputEl.textContent = '⚠️ ' + (data.message || 'خطا در ترجمه متن.');
+                    outputEl.textContent = '⚠️ ' + (data.message || 'خطا در پردازش متن.');
                 }
             } catch (err) {
                 loadingEl.classList.add('hidden');
@@ -1089,31 +1682,16 @@ $initial_sub = function_exists('get_user_subscription_info')
             }
         }
 
-        // تلفظ صوتی متن انگلیسی با موتور داخلی مرورگر (Web Speech API)
-        function speakEnglishText() {
-            const text = document.getElementById('source-english-textarea').value.trim();
-            if (!text) return;
-            if (!('speechSynthesis' in window)) {
-                alert('مرورگر شما از تلفظ صوتی پشتیبانی نمی‌کند.');
-                return;
-            }
-            window.speechSynthesis.cancel();
-            const utter = new SpeechSynthesisUtterance(text);
-            utter.lang = 'en-US';
-            utter.rate = 0.92;
-            window.speechSynthesis.speak(utter);
-        }
-
         function copyTranslatedText() {
             const text = document.getElementById('translated-persian-output').textContent.trim();
             if (!text) return;
             navigator.clipboard.writeText(text).then(() => {
-                alert('ترجمه فارسی کپی شد.');
+                alert('متن فارسی کپی شد.');
             });
         }
 
         // ====================================================
-        // مدیریت فیش‌های پژوهشی مقاله (ذخیره، مشاهده و کپی یکجا)
+        // مدیریت فیش‌های پژوهشی مقاله + خروجی Word (.doc) و PDF
         // ====================================================
         async function fetchPaperNotes(pdfId) {
             if (!pdfId) return;
@@ -1123,6 +1701,7 @@ $initial_sub = function_exists('get_user_subscription_info')
                 paperNotes = data.notes || [];
                 document.getElementById('notes-count-badge').textContent = paperNotes.length;
                 renderPaperNotesList();
+                refreshNotedSegmentsHighlight();
             }
         }
 
@@ -1134,6 +1713,7 @@ $initial_sub = function_exists('get_user_subscription_info')
             fd.append('action', 'save_note');
             fd.append('pdf_id', activePaperMeta.id);
             fd.append('page_number', currentPaperPage);
+            fd.append('para_hash', lastTranslatedObj.para_hash || '');
             fd.append('original_text', lastTranslatedObj.original);
             fd.append('translated_text', lastTranslatedObj.translated);
             fd.append('user_comment', comment);
@@ -1143,7 +1723,8 @@ $initial_sub = function_exists('get_user_subscription_info')
             if (data.status === 'success') {
                 document.getElementById('note-user-comment').value = '';
                 await fetchPaperNotes(activePaperMeta.id);
-                alert('📌 این بند با موفقیت در فیش‌های مقاله ذخیره شد.');
+                refreshNotedSegmentsHighlight();
+                alert('📌 این جمله با موفقیت در فیش‌های مقاله ذخیره شد و روی صفحه با رنگ سبز علامت خورد.');
             } else {
                 alert(data.message || 'خطا در ذخیره فیش');
             }
@@ -1151,21 +1732,35 @@ $initial_sub = function_exists('get_user_subscription_info')
 
         function renderPaperNotesList() {
             const listEl = document.getElementById('paper-notes-list');
+            const query  = (document.getElementById('notes-search-input')?.value || '').trim().toLowerCase();
+
             if (paperNotes.length === 0) {
                 listEl.innerHTML = `<div class="text-center text-slate-400 py-10">هنوز فیشی برای این مقاله ذخیره نکرده‌اید.</div>`;
                 return;
             }
 
-            listEl.innerHTML = paperNotes.map(n => `
+            const filtered = paperNotes.filter(n => {
+                if (!query) return true;
+                return String(n.original_text).toLowerCase().includes(query) ||
+                       String(n.translated_text).toLowerCase().includes(query) ||
+                       String(n.user_comment || '').toLowerCase().includes(query);
+            });
+
+            if (filtered.length === 0) {
+                listEl.innerHTML = `<div class="text-center text-slate-400 py-8">هیچ فیشی با عبارت جستجو شده مطابقت ندارد.</div>`;
+                return;
+            }
+
+            listEl.innerHTML = filtered.map((n, idx) => `
                 <div class="p-3 bg-slate-50 rounded-2xl border border-slate-200 space-y-1.5">
                     <div class="flex items-center justify-between">
-                        <button type="button" onclick="jumpToPaperPage(${n.page_number})" class="bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded-md font-extrabold text-[10px]">
-                            📄 صفحه ${n.page_number} (پرش به صفحه)
+                        <button type="button" onclick="jumpToPaperPage(${n.page_number})" class="bg-indigo-100 hover:bg-indigo-200 text-indigo-800 px-2 py-0.5 rounded-md font-extrabold text-[10px] transition">
+                            📄 فیش #${idx + 1} • صفحه ${n.page_number} (پرش به صفحه)
                         </button>
-                        <button type="button" onclick="deletePaperNote(${n.id})" class="text-slate-400 hover:text-rose-600 text-xs">🗑️</button>
+                        <button type="button" onclick="deletePaperNote(${n.id})" class="text-slate-400 hover:text-rose-600 text-xs" title="حذف فیش">🗑️</button>
                     </div>
-                    <div class="text-[11px] text-slate-500 font-sans dir-ltr text-left line-clamp-2">${escapeHtml(n.original_text)}</div>
-                    <div class="text-xs text-slate-800 font-bold leading-6">${escapeHtml(n.translated_text)}</div>
+                    <div class="text-[11px] text-slate-500 font-sans dir-ltr text-left leading-relaxed bg-white p-2 rounded-lg border border-slate-100 select-text">${escapeHtml(n.original_text)}</div>
+                    <div class="text-xs text-slate-800 font-bold leading-6 select-text">${escapeHtml(n.translated_text)}</div>
                     ${n.user_comment ? `<div class="text-[11px] bg-amber-50 border border-amber-200 text-amber-900 p-1.5 rounded-lg">💡 یادداشت: ${escapeHtml(n.user_comment)}</div>` : ''}
                 </div>
             `).join('');
@@ -1181,14 +1776,136 @@ $initial_sub = function_exists('get_user_subscription_info')
         }
 
         function copyAllPaperNotes() {
-            if (paperNotes.length === 0) return;
+            if (paperNotes.length === 0) {
+                alert('فیشی برای کپی کردن وجود ندارد.');
+                return;
+            }
             const text = paperNotes.map((n, i) =>
                 `[${i + 1}] صفحه ${n.page_number}:\n🇬🇧 ${n.original_text}\n🇮🇷 ${n.translated_text}${n.user_comment ? '\n💡 نکته: ' + n.user_comment : ''}`
             ).join('\n\n------------------------\n\n');
 
             navigator.clipboard.writeText(text).then(() => {
-                alert('تمام فیش‌های این مقاله کپی شدند!');
+                alert('تمام فیش‌های این مقاله در کلیپ‌بورد کپی شدند!');
             });
+        }
+
+        function exportNotesToWord() {
+            if (!activePaperMeta || paperNotes.length === 0) {
+                alert('ابتدا حداقل یک فیش از مقاله ذخیره کنید تا فایل Word آن تولید شود.');
+                return;
+            }
+
+            const paperTitle = escapeHtml(activePaperMeta.title);
+            let rowsHtml = '';
+
+            paperNotes.forEach((n, i) => {
+                rowsHtml += `
+                    <div style="border:1px solid #cbd5e1; border-radius:8px; padding:12px; margin-bottom:14px; background:#f8fafc;">
+                        <div style="font-weight:bold; color:#312e81; margin-bottom:6px; font-size:11pt;">
+                            📌 فیش شماره ${i + 1} (صفحه ${n.page_number} مقاله)
+                        </div>
+                        <div dir="ltr" style="text-align:left; font-family:Calibri, Arial, sans-serif; font-size:10.5pt; color:#334155; background:#ffffff; padding:8px; border:1px solid #e2e8f0; margin-bottom:8px;">
+                            ${escapeHtml(n.original_text)}
+                        </div>
+                        <div dir="rtl" style="text-align:right; font-family:Tahoma, Arial, sans-serif; font-size:11pt; color:#0f172a; font-weight:bold; line-height:1.7;">
+                            🇮🇷 ترجمه: ${escapeHtml(n.translated_text)}
+                        </div>
+                        ${n.user_comment ? `<div dir="rtl" style="margin-top:6px; color:#92400e; background:#fef3c7; padding:6px; font-size:10pt;">💡 یادداشت پژوهشی: ${escapeHtml(n.user_comment)}</div>` : ''}
+                    </div>
+                `;
+            });
+
+            const wordHtml = `
+                <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40" dir="rtl">
+                <head>
+                    <meta charset="utf-8">
+                    <title>فیش‌های پژوهشی مقاله - ${paperTitle}</title>
+                </head>
+                <body style="font-family:Tahoma, Arial, sans-serif; direction:rtl; text-align:right; padding:20px;">
+                    <h2 style="color:#1e1b4b; border-bottom:2px solid #4f46e5; padding-bottom:8px;">📑 دفترچه فیش‌های پژوهشی و ترجمه مقاله</h2>
+                    <p style="font-size:11pt; color:#475569;"><b>عنوان مقاله:</b> ${paperTitle} | <b>تعداد فیش‌ها:</b> ${paperNotes.length}</p>
+                    <hr style="margin:15px 0;">
+                    ${rowsHtml}
+                </body>
+                </html>
+            `;
+
+            const blob = new Blob(['\ufeff', wordHtml], { type: 'application/msword;charset=utf-8' });
+            const url  = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            const safeFileName = activePaperMeta.title.replace(/[^a-zA-Z0-9آ-ی_\-]/g, '_');
+            link.download = `Notes_${safeFileName}.doc`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+        }
+
+        function exportNotesToPdfPrint() {
+            if (!activePaperMeta || paperNotes.length === 0) {
+                alert('ابتدا حداقل یک فیش از مقاله ذخیره کنید.');
+                return;
+            }
+
+            const paperTitle = escapeHtml(activePaperMeta.title);
+            const itemsHtml = paperNotes.map((n, i) => `
+                <div class="note-card">
+                    <div class="note-header">
+                        <span>📌 فیش شماره ${i + 1}</span>
+                        <span>صفحه ${n.page_number} مقاله</span>
+                    </div>
+                    <div class="en-box" dir="ltr">${escapeHtml(n.original_text)}</div>
+                    <div class="fa-box" dir="rtl">${escapeHtml(n.translated_text)}</div>
+                    ${n.user_comment ? `<div class="comment-box" dir="rtl">💡 یادداشت شخصی: ${escapeHtml(n.user_comment)}</div>` : ''}
+                </div>
+            `).join('');
+
+            const printWin = window.open('', '_blank');
+            if (!printWin) {
+                alert('لطفاً اجازه باز شدن پنجره (Pop-up) را در مرورگر بدهید.');
+                return;
+            }
+
+            printWin.document.write(`
+                <!DOCTYPE html>
+                <html lang="fa" dir="rtl">
+                <head>
+                    <meta charset="UTF-8">
+                    <title>فیش‌های پژوهشی - ${paperTitle}</title>
+                    <link href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css" rel="stylesheet">
+                    <style>
+                        body { font-family: 'Vazirmatn', Tahoma, sans-serif; color: #0f172a; padding: 24px; max-width: 850px; margin: 0 auto; }
+                        .top-header { border-bottom: 2px solid #4f46e5; padding-bottom: 12px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; }
+                        .top-header h1 { font-size: 18px; margin: 0; color: #1e1b4b; }
+                        .note-card { border: 1px solid #cbd5e1; border-radius: 12px; padding: 14px; margin-bottom: 14px; page-break-inside: avoid; background: #fff; }
+                        .note-header { display: flex; justify-content: space-between; font-weight: bold; font-size: 12px; color: #4338ca; margin-bottom: 8px; }
+                        .en-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px; font-family: sans-serif; font-size: 12px; color: #334155; text-align: left; line-height: 1.5; margin-bottom: 8px; }
+                        .fa-box { font-size: 13px; font-weight: bold; line-height: 1.8; color: #0f172a; }
+                        .comment-box { margin-top: 8px; background: #fef3c7; border: 1px solid #fde68a; border-radius: 8px; padding: 8px; font-size: 11px; color: #92400e; }
+                        @media print { .no-print { display: none; } body { padding: 0; } }
+                    </style>
+                </head>
+                <body>
+                    <div class="no-print" style="margin-bottom:16px; text-align:left;">
+                        <button onclick="window.print()" style="background:#4f46e5;color:#fff;border:none;padding:8px 16px;border-radius:8px;font-family:inherit;font-weight:bold;cursor:pointer;">
+                            🖨️ ذخیره به عنوان PDF / چاپ
+                        </button>
+                    </div>
+                    <div class="top-header">
+                        <div>
+                            <h1>📑 فیش‌های پژوهشی مقاله: ${paperTitle}</h1>
+                            <div style="font-size:12px;color:#64748b;margin-top:4px;">پژوهشگر: <?php echo htmlspecialchars($_SESSION['full_name']); ?> | تعداد فیش‌ها: ${paperNotes.length}</div>
+                        </div>
+                    </div>
+                    ${itemsHtml}
+                    <script>
+                        window.onload = function() { setTimeout(function() { window.print(); }, 400); };
+                    <\/script>
+                </body>
+                </html>
+            `);
+            printWin.document.close();
         }
 
         // ====================================================
@@ -1198,6 +1915,7 @@ $initial_sub = function_exists('get_user_subscription_info')
             if (!paperDocInstance) return;
             const next = currentPaperPage + delta;
             if (next >= 1 && next <= paperDocInstance.numPages) {
+                stopSpeech();
                 currentPaperPage = next;
                 renderPaperPage(currentPaperPage);
                 document.getElementById('paper-viewport-container').scrollTop = 0;
@@ -1206,6 +1924,7 @@ $initial_sub = function_exists('get_user_subscription_info')
 
         function jumpToPaperPage(val) {
             if (!paperDocInstance) return;
+            stopSpeech();
             currentPaperPage = Math.min(paperDocInstance.numPages, Math.max(1, parseInt(val) || 1));
             renderPaperPage(currentPaperPage);
             document.getElementById('paper-viewport-container').scrollTop = 0;
@@ -1251,7 +1970,6 @@ $initial_sub = function_exists('get_user_subscription_info')
             await fetch('api_pdf.php', { method: 'POST', body: fd });
         }
 
-        // آپلود مقاله جدید
         function openUploadPaperModal() {
             const totalFiles = papersList.length + bookletsList.length;
             if (!userSub.is_vip && totalFiles >= FREE_MAX_PDF_CNT) {
@@ -1315,7 +2033,6 @@ $initial_sub = function_exists('get_user_subscription_info')
             }
         }
 
-        // ایمپورت فایل از بخش جزوه‌خوان به مقاله‌خوان
         function openImportBookletModal() {
             const listEl = document.getElementById('booklets-import-list');
             if (bookletsList.length === 0) {
@@ -1374,9 +2091,6 @@ $initial_sub = function_exists('get_user_subscription_info')
             }
         }
 
-        // ====================================================
-        // مدیریت پنل‌های موبایل، تب‌ها، کلید شخصی و مودال اشتراک
-        // ====================================================
         function switchTranslatorTab(tab) {
             const trPanel = document.getElementById('panel-tab-translate');
             const ntPanel = document.getElementById('panel-tab-notes');
@@ -1427,30 +2141,6 @@ $initial_sub = function_exists('get_user_subscription_info')
         function closePaperSidebarMobile() {
             document.getElementById('paper-sidebar').classList.add('translate-x-full');
             document.getElementById('paper-sidebar-backdrop').classList.add('hidden');
-        }
-
-        function toggleByokBox() {
-            const box = document.getElementById('byok-settings-box');
-            box.classList.toggle('hidden');
-            if (!box.classList.contains('hidden')) {
-                document.getElementById('user-custom-api-key').value = localStorage.getItem('user_custom_ai_key') || '';
-                document.getElementById('user-custom-provider').value = localStorage.getItem('user_custom_ai_provider') || 'gemini';
-            }
-        }
-
-        function saveUserCustomApiKey() {
-            const key  = document.getElementById('user-custom-api-key').value.trim();
-            const prov = document.getElementById('user-custom-provider').value;
-            if (key) {
-                localStorage.setItem('user_custom_ai_key', key);
-                localStorage.setItem('user_custom_ai_provider', prov);
-                alert('✅ کلید API شخصی شما در مرورگر ذخیره شد.');
-            } else {
-                localStorage.removeItem('user_custom_ai_key');
-                alert('کلید شخصی حذف شد.');
-            }
-            document.getElementById('byok-settings-box').classList.add('hidden');
-            refreshSubscriptionUI();
         }
 
         function openSubscriptionModal(reasonMessage = '') {

@@ -1,6 +1,8 @@
 <?php
 require_once 'config.php';
 
+@set_time_limit(90);
+
 if (!isset($_SESSION['user_id'])) {
     http_response_code(401);
     header('Content-Type: application/json; charset=utf-8');
@@ -12,9 +14,7 @@ $user_id  = (int)$_SESSION['user_id'];
 $action   = $_GET['action'] ?? ($_POST['action'] ?? '');
 $sub_info = get_user_subscription_info($pdo, $user_id);
 
-// ====================================================
 // ایجاد خودکار پوشه اختصاصی مقالات (uploads/papers/)
-// ====================================================
 $papers_dir = __DIR__ . '/uploads/papers/';
 if (!is_dir($papers_dir)) {
     mkdir($papers_dir, 0755, true);
@@ -25,7 +25,6 @@ if (!is_file($htaccess_path)) {
     @file_put_contents($htaccess_path, $ht_content);
 }
 
-// تابع کمکی: دریافت لیست شناسه‌های PDF مجاز برای کاربر (عادی = ۱ فایل، ویژه = نامحدود)
 function get_allowed_pdf_ids($pdo, $user_id, $is_vip) {
     $stmt = $pdo->prepare("SELECT id FROM pdfs WHERE user_id = ? ORDER BY id DESC");
     $stmt->execute([$user_id]);
@@ -79,17 +78,73 @@ if ($action === 'raw') {
 header('Content-Type: application/json; charset=utf-8');
 
 // ====================================================
-// توابع موتورهای ترجمه (Google GTX + MyMemory + AI Gemini/OpenAI)
+// توابع پاکسازی متن و مدیریت استخر کلیدها و مدل‌ها
 // ====================================================
-
-// پاکسازی متن انگلیسی استخراج‌شده از PDF (حذف خط تیره شکستگی سطرها و فاصله‌های اضافی)
 function sanitize_pdf_english_text($text) {
     $text = trim($text);
-    // چسباندن کلماتی که در انتهای سطر با خط تیره شکسته شده‌اند (مثلاً spatio-\ntemporal)
     $text = preg_replace('/(\w)-\s+([a-z])/u', '$1$2', $text);
-    // تبدیل اینترهای داخل یک پاراگراف به فاصله استاندارد
     $text = preg_replace('/\s+/u', ' ', $text);
     return trim($text);
+}
+
+function get_valid_ai_keys_pool() {
+    $pool = [];
+    if (defined('AI_API_KEYS') && is_array(AI_API_KEYS)) {
+        foreach (AI_API_KEYS as $k) {
+            $k = trim($k);
+            if (!empty($k) && strpos($k, 'YOUR_GEMINI_API_KEY') === false && strpos($k, 'YOUR_AI_API_KEY') === false) {
+                $pool[] = $k;
+            }
+        }
+    }
+    if (empty($pool) && defined('AI_API_KEY')) {
+        $single = trim(AI_API_KEY);
+        if (!empty($single) && strpos($single, 'YOUR_') === false) {
+            $pool[] = $single;
+        }
+    }
+    if (count($pool) > 1) {
+        shuffle($pool);
+    }
+    return $pool;
+}
+
+function extract_fallback_academic_keywords($english_text) {
+    $stop_words = [
+        'the','and','for','that','this','with','from','are','was','were','have','has','had',
+        'not','but','what','all','when','where','who','will','more','about','which','their',
+        'there','been','also','into','such','than','then','them','these','those','some','would',
+        'could','should','over','after','before','between','under','while','during','through',
+        'using','based','paper','study','results','method','methods','proposed','section','figure',
+        'table','show','shown','shows','used','however','therefore','thus','where','each','both'
+    ];
+
+    preg_match_all('/\b[a-zA-Z]{6,18}\b/', $english_text, $matches);
+    $words = $matches[0] ?? [];
+    $candidates = [];
+
+    foreach ($words as $w) {
+        $lw = strtolower($w);
+        if (!in_array($lw, $stop_words, true) && !in_array($lw, $candidates, true)) {
+            $candidates[] = $w;
+            if (count($candidates) >= 4) break;
+        }
+    }
+
+    if (empty($candidates)) return [];
+
+    $joined = implode(' | ', $candidates);
+    $tr = translate_via_google_gtx($joined, 'en', 'fa');
+    if (!$tr['ok']) return [];
+
+    $fa_parts = array_map('trim', explode('|', $tr['text']));
+    $kw_list = [];
+    foreach ($candidates as $i => $en_w) {
+        if (!empty($fa_parts[$i])) {
+            $kw_list[] = ['en' => $en_w, 'fa' => $fa_parts[$i]];
+        }
+    }
+    return $kw_list;
 }
 
 // ۱. موتور رایگان Google Translate (GTX)
@@ -102,8 +157,11 @@ function translate_via_google_gtx($text, $source = 'en', $target = 'fa') {
         CURLOPT_POST           => true,
         CURLOPT_POSTFIELDS     => $post_data,
         CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_CONNECTTIMEOUT => 6,
         CURLOPT_TIMEOUT        => 12,
+        CURLOPT_IPRESOLVE      => CURL_IPRESOLVE_V4,
         CURLOPT_SSL_VERIFYPEER => false,
+        CURLOPT_SSL_VERIFYHOST => 0,
         CURLOPT_USERAGENT      => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         CURLOPT_HTTPHEADER     => ['Content-Type: application/x-www-form-urlencoded; charset=UTF-8']
     ]);
@@ -129,13 +187,12 @@ function translate_via_google_gtx($text, $source = 'en', $target = 'fa') {
     }
 
     return !empty(trim($translated))
-        ? ['ok' => true, 'text' => trim($translated)]
+        ? ['ok' => true, 'text' => trim($translated), 'keywords' => []]
         : ['ok' => false, 'error' => 'ترجمه خالی برگشت داده شد'];
 }
 
 // ۲. موتور رایگان MyMemory API
 function translate_via_mymemory($text, $source = 'en', $target = 'fa') {
-    // محدودیت هر درخواست رایگان MyMemory حدود 500 کاراکتر است؛ برای متون بلندتر تکه‌بندی می‌کنیم
     $chunks = [];
     if (mb_strlen($text, 'UTF-8') <= 480) {
         $chunks[] = $text;
@@ -159,9 +216,12 @@ function translate_via_mymemory($text, $source = 'en', $target = 'fa') {
         $ch = curl_init($url);
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_CONNECTTIMEOUT => 6,
             CURLOPT_TIMEOUT        => 12,
+            CURLOPT_IPRESOLVE      => CURL_IPRESOLVE_V4,
             CURLOPT_SSL_VERIFYPEER => false,
-            CURLOPT_USERAGENT      => 'Mozilla/5.0 (AcademicPaperReader/3.0)'
+            CURLOPT_SSL_VERIFYHOST => 0,
+            CURLOPT_USERAGENT      => 'Mozilla/5.0 (AcademicPaperReader/3.8)'
         ]);
         $res = curl_exec($ch);
         $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
@@ -178,35 +238,43 @@ function translate_via_mymemory($text, $source = 'en', $target = 'fa') {
         }
     }
 
-    return ['ok' => true, 'text' => implode(' ', $final_translation)];
+    return ['ok' => true, 'text' => implode(' ', $final_translation), 'keywords' => []];
 }
 
-// ۳. موتور تخصصی هوش مصنوعی (پشتیبانی از Gemini و OpenAI/OpenRouter/DeepSeek)
-function translate_via_ai_engine($text, $provider, $api_key, $model_name, $openai_endpoint) {
-    $system_prompt = "تو یک مترجم برجسته و تخصصی مقالات علمی و دانشگاهی (Academic Paper Translator) هستی. "
-        . "متن انگلیسی زیر را به فارسی روان، دقیق و علمی ترجمه کن. "
-        . "قوانین مهم:\n"
-        . "1. برای اصطلاحات تخصصی کلیدی، معادل فارسی را بنویس و اصطلاح اصلی انگلیسی را داخل پرانتز بیاور؛ مثلاً: مطالعه حذفی (Ablation Study).\n"
-        . "2. فرمول‌ها، متغیرهای ریاضی و شماره رفرنس‌ها مانند [12] را بدون تغییر حفظ کن.\n"
-        . "3. اگر ورودی فقط یک کلمه یا عبارت کوتاه است، معنی دقیق علمی و عمومی آن را به همراه یک توضیح کوتاه بنویس.\n"
-        . "4. هیچ جمله‌ی اضافه‌ای در ابتدا یا انتهای پیام ننویس و مستقیماً فقط متن ترجمه شده را برگردان.";
+// ۳. ارسال درخواست به یک مدل و کلید مشخص هوش مصنوعی
+function call_single_ai_key($text, $task_mode, $provider, $api_key, $model_name, $openai_endpoint) {
+    if ($task_mode === 'summarize') {
+        $system_prompt = "تو یک استاد دانشگاه و دستیار پژوهشی هستی. "
+            . "متن انگلیسی زیر را بخوان و «پیام کلیدی و نتیجه‌گیری علمی» آن را به زبان فارسی روان و خلاصه (در ۱ تا ۳ نکته کوتاه با علامت •) بنویس. "
+            . "اصطلاحات مهم انگلیسی را داخل پرانتز بنویس. هیچ توضیح اضافه‌ای ننویس.\n"
+            . "در انتهای پاسخ، در یک خط جدید دقیقاً عبارت |||KEYWORDS||| را بنویس و بعد از آن ۳ تا ۵ واژه تخصصی مهم متن را به فرمت English: فارسی (جداشده با علامت |) بنویس.";
+    } else {
+        $system_prompt = "تو یک مترجم برجسته و تخصصی مقالات علمی و دانشگاهی هستی. "
+            . "متن انگلیسی زیر را به فارسی روان، دقیق و علمی ترجمه کن.\n"
+            . "قوانین:\n"
+            . "1. برای اصطلاحات تخصصی کلیدی، معادل فارسی را بنویس و اصطلاح انگلیسی را داخل پرانتز بیاور؛ مثلاً: مطالعه حذفی (Ablation Study).\n"
+            . "2. فرمول‌ها، متغیرها و رفرنس‌ها مانند [12] را حفظ کن و هیچ جمله اضافه‌ای در اول یا آخر پیام ننویس.\n"
+            . "3. در انتهای ترجمه، در یک خط جدید دقیقاً عبارت |||KEYWORDS||| را بنویس و بعد از آن ۳ تا ۵ واژه تخصصی مهم متن را به فرمت English Term: معادل فارسی (جداشده با علامت |) بنویس.";
+    }
 
     if ($provider === 'gemini') {
-        $model = !empty($model_name) ? $model_name : 'gemini-2.5-flash';
+        $model = !empty($model_name) ? trim($model_name) : 'gemini-3.7-flash';
+        $model = preg_replace('#^models/#i', '', $model);
+
         $url = "https://generativelanguage.googleapis.com/v1beta/models/" . urlencode($model) . ":generateContent?key=" . urlencode($api_key);
 
+        $combined_prompt = $system_prompt . "\n\nمتن انگلیسی جهت پردازش:\n" . $text;
+
         $payload = [
-            'system_instruction' => [
-                'parts' => [['text' => $system_prompt]]
-            ],
             'contents' => [
                 [
                     'role'  => 'user',
-                    'parts' => [['text' => "متن جهت ترجمه تخصصی به فارسی:\n\n" . $text]]
+                    'parts' => [['text' => $combined_prompt]]
                 ]
             ],
             'generationConfig' => [
-                'temperature' => 0.2
+                'temperature'     => 0.2,
+                'maxOutputTokens' => 1024
             ]
         ];
 
@@ -214,23 +282,61 @@ function translate_via_ai_engine($text, $provider, $api_key, $model_name, $opena
         curl_setopt_array($ch, [
             CURLOPT_POST           => true,
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT        => 20,
+            CURLOPT_CONNECTTIMEOUT => 7,
+            CURLOPT_TIMEOUT        => 14,
+            CURLOPT_IPRESOLVE      => CURL_IPRESOLVE_V4,
+            CURLOPT_HTTP_VERSION   => CURL_HTTP_VERSION_1_1,
             CURLOPT_SSL_VERIFYPEER => false,
-            CURLOPT_HTTPHEADER     => ['Content-Type: application/json'],
+            CURLOPT_SSL_VERIFYHOST => 0,
+            CURLOPT_HTTPHEADER     => [
+                'Content-Type: application/json',
+                'Connection: close'
+            ],
             CURLOPT_POSTFIELDS     => json_encode($payload, JSON_UNESCAPED_UNICODE)
         ]);
-        $res = curl_exec($ch);
-        $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+
+        $res       = curl_exec($ch);
+        $http_code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curl_err  = curl_error($ch);
         curl_close($ch);
 
-        $data = json_decode($res, true);
-        if ($code === 200 && isset($data['candidates'][0]['content']['parts'][0]['text'])) {
-            return ['ok' => true, 'text' => trim($data['candidates'][0]['content']['parts'][0]['text'])];
+        if ($http_code === 0 || $res === false) {
+            return [
+                'ok'        => false,
+                'http_code' => 0,
+                'error'     => 'Timeout (' . ($curl_err ?: 'سرور پاسخ نداد') . ')'
+            ];
         }
-        $err_msg = $data['error']['message'] ?? 'خطا در پاسخ وب‌سرویس Gemini';
-        return ['ok' => false, 'error' => $err_msg];
+
+        $data = json_decode($res, true);
+        if ($http_code === 200 && isset($data['candidates'][0]['content']['parts'])) {
+            $parts_list = $data['candidates'][0]['content']['parts'];
+            $collected_text = '';
+            foreach ($parts_list as $p) {
+                if (isset($p['thought']) && $p['thought'] === true) {
+                    continue;
+                }
+                if (!empty($p['text'])) {
+                    $collected_text .= $p['text'] . "\n";
+                }
+            }
+            $collected_text = trim($collected_text);
+            if (!empty($collected_text)) {
+                return [
+                    'ok'        => true,
+                    'http_code' => 200,
+                    'raw_text'  => $collected_text,
+                    'model'     => $model
+                ];
+            }
+        }
+
+        return [
+            'ok'        => false,
+            'http_code' => $http_code,
+            'error'     => $data['error']['message'] ?? "HTTP {$http_code}"
+        ];
     } else {
-        // استاندارد OpenAI / OpenRouter / DeepSeek / Groq
         $endpoint = !empty($openai_endpoint) ? $openai_endpoint : 'https://api.openai.com/v1/chat/completions';
         $model    = !empty($model_name) ? $model_name : 'gpt-4o-mini';
 
@@ -247,30 +353,127 @@ function translate_via_ai_engine($text, $provider, $api_key, $model_name, $opena
         curl_setopt_array($ch, [
             CURLOPT_POST           => true,
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT        => 20,
+            CURLOPT_CONNECTTIMEOUT => 7,
+            CURLOPT_TIMEOUT        => 15,
+            CURLOPT_IPRESOLVE      => CURL_IPRESOLVE_V4,
+            CURLOPT_HTTP_VERSION   => CURL_HTTP_VERSION_1_1,
             CURLOPT_SSL_VERIFYPEER => false,
+            CURLOPT_SSL_VERIFYHOST => 0,
             CURLOPT_HTTPHEADER     => [
                 'Content-Type: application/json',
-                'Authorization: Bearer ' . $api_key
+                'Authorization: Bearer ' . $api_key,
+                'Connection: close'
             ],
             CURLOPT_POSTFIELDS     => json_encode($payload, JSON_UNESCAPED_UNICODE)
         ]);
-        $res = curl_exec($ch);
-        $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+
+        $res       = curl_exec($ch);
+        $http_code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curl_err  = curl_error($ch);
         curl_close($ch);
 
-        $data = json_decode($res, true);
-        if ($code === 200 && isset($data['choices'][0]['message']['content'])) {
-            return ['ok' => true, 'text' => trim($data['choices'][0]['message']['content'])];
+        if ($http_code === 0 || $res === false) {
+            return ['ok' => false, 'http_code' => 0, 'error' => $curl_err ?: 'Timeout'];
         }
-        $err_msg = $data['error']['message'] ?? 'خطا در وب‌سرویس هوش مصنوعی';
-        return ['ok' => false, 'error' => $err_msg];
+
+        $data = json_decode($res, true);
+        if ($http_code === 200 && isset($data['choices'][0]['message']['content'])) {
+            return [
+                'ok'        => true,
+                'http_code' => 200,
+                'raw_text'  => trim($data['choices'][0]['message']['content']),
+                'model'     => $model
+            ];
+        }
+
+        return [
+            'ok'        => false,
+            'http_code' => $http_code,
+            'error'     => $data['error']['message'] ?? "HTTP {$http_code}"
+        ];
     }
+}
+
+// ۴. چرخش هوشمند بین مدل‌های فعال موجود در اکانت شما
+function translate_via_ai_pool($text, $task_mode = 'translate') {
+    $keys_pool = get_valid_ai_keys_pool();
+    if (empty($keys_pool)) {
+        return ['ok' => false, 'error' => 'هیچ کلید API فعالی در config.php تنظیم نشده است.'];
+    }
+
+    $provider      = defined('AI_PROVIDER') ? AI_PROVIDER : 'gemini';
+    $primary_model = defined('AI_MODEL_NAME') ? preg_replace('#^models/#i', '', trim(AI_MODEL_NAME)) : 'gemini-3.7-flash';
+    $endpoint      = defined('AI_OPENAI_ENDPOINT') ? AI_OPENAI_ENDPOINT : '';
+
+    $exact_account_models = [
+        'gemini-3.7-flash',
+        'gemini-3.6-flash',
+        'gemini-3.5-flash',
+        'gemini-3.5-flash-lite',
+        'gemini-3.1-flash-lite',
+        'gemma-4-31b-it',
+        'gemini-3.8-flash'
+    ];
+
+    if ($provider === 'gemini') {
+        if ($primary_model !== 'gemini-3.8-flash' && $primary_model !== 'gemini-2.5-flash') {
+            array_unshift($exact_account_models, $primary_model);
+        }
+        $candidate_models = array_values(array_unique($exact_account_models));
+    } else {
+        $candidate_models = [$primary_model];
+    }
+
+    $last_error = '';
+
+    foreach ($candidate_models as $current_model) {
+        foreach ($keys_pool as $index => $api_key) {
+            $attempt = call_single_ai_key($text, $task_mode, $provider, $api_key, $current_model, $endpoint);
+            if ($attempt['ok']) {
+                $raw_output = $attempt['raw_text'];
+                $main_text  = $raw_output;
+                $keywords   = [];
+
+                if (strpos($raw_output, '|||KEYWORDS|||') !== false) {
+                    $parts = explode('|||KEYWORDS|||', $raw_output, 2);
+                    $main_text = trim($parts[0]);
+                    $kw_raw = trim($parts[1]);
+
+                    $kw_items = preg_split('/[\|\n,،]+/u', $kw_raw);
+                    foreach ($kw_items as $item) {
+                        $item = trim($item, " \t\n\r\0\x0B-*•");
+                        if (mb_strlen($item, 'UTF-8') > 2 && strpos($item, ':') !== false) {
+                            list($en_term, $fa_term) = array_map('trim', explode(':', $item, 2));
+                            if (!empty($en_term) && !empty($fa_term)) {
+                                $keywords[] = ['en' => $en_term, 'fa' => $fa_term];
+                            }
+                        }
+                    }
+                }
+
+                return [
+                    'ok'       => true,
+                    'text'     => $main_text,
+                    'keywords' => array_slice($keywords, 0, 6),
+                    'model'    => $current_model
+                ];
+            }
+
+            $last_error = $attempt['error'];
+            $code = $attempt['http_code'];
+
+            if ($code === 503 || $code === 404 || $code === 400 || $code === 0) {
+                break;
+            }
+        }
+    }
+
+    return ['ok' => false, 'error' => $last_error];
 }
 
 try {
     // ====================================================
-    // ۱. دریافت لیست مقالات، لیست جزوات (جهت ایمپورت) و تنظیمات هوش مصنوعی
+    // ۱. دریافت لیست مقالات، لیست جزوات و وضعیت هوش مصنوعی
     // ====================================================
     if ($action === 'list_papers') {
         $stmt = $pdo->prepare("
@@ -286,7 +489,6 @@ try {
         $booklets = [];
 
         foreach ($all_pdfs as $idx => $item) {
-            // اعمال قانون قفل اشتراک روی فایل‌های مازاد کاربر عادی
             $item['is_locked'] = (!$sub_info['is_vip'] && $idx >= FREE_MAX_PDF_COUNT);
             if ((int)$item['is_paper'] === 1) {
                 $papers[] = $item;
@@ -295,7 +497,7 @@ try {
             }
         }
 
-        $has_server_ai_key = (defined('AI_API_KEY') && !empty(AI_API_KEY) && AI_API_KEY !== 'YOUR_AI_API_KEY');
+        $valid_pool = get_valid_ai_keys_pool();
 
         echo json_encode([
             'status'       => 'success',
@@ -303,17 +505,16 @@ try {
             'booklets'     => $booklets,
             'subscription' => $sub_info,
             'ai_config'    => [
-                'enabled'        => defined('AI_TRANSLATION_ENABLED') ? (bool)AI_TRANSLATION_ENABLED : false,
-                'vip_only'       => defined('AI_VIP_ONLY') ? (bool)AI_VIP_ONLY : true,
-                'provider'       => defined('AI_PROVIDER') ? AI_PROVIDER : 'gemini',
-                'has_server_key' => $has_server_ai_key
+                'enabled'    => defined('AI_TRANSLATION_ENABLED') ? (bool)AI_TRANSLATION_ENABLED : false,
+                'vip_only'   => defined('AI_VIP_ONLY') ? (bool)AI_VIP_ONLY : true,
+                'keys_count' => count($valid_pool)
             ]
         ]);
         exit;
     }
 
     // ====================================================
-    // ۲. آپلود مقاله جدید مستقیماً در پوشه مجزای uploads/papers/
+    // ۲. آپلود مقاله جدید در پوشه uploads/papers/
     // ====================================================
     if ($action === 'upload_paper') {
         $title = trim($_POST['title'] ?? '');
@@ -322,7 +523,6 @@ try {
             exit;
         }
 
-        // بررسی محدودیت تعداد فایل برای کاربران عادی
         if (!$sub_info['is_vip']) {
             $cntStmt = $pdo->prepare("SELECT COUNT(*) FROM pdfs WHERE user_id = ?");
             $cntStmt->execute([$user_id]);
@@ -363,7 +563,6 @@ try {
             exit;
         }
 
-        // ذخیره در پوشه مستقل uploads/papers/
         $new_filename = 'paper_u' . $user_id . '_' . time() . '_' . bin2hex(random_bytes(4)) . '.pdf';
         $dest_path    = $papers_dir . $new_filename;
         $db_rel_path  = 'uploads/papers/' . $new_filename;
@@ -382,7 +581,7 @@ try {
 
         echo json_encode([
             'status'  => 'success',
-            'message' => 'مقاله با موفقیت در پوشه مقالات آپلود شد.',
+            'message' => 'مقاله با موفقیت آپلود شد.',
             'paper'   => [
                 'id'          => $new_id,
                 'title'       => $title,
@@ -396,7 +595,7 @@ try {
     }
 
     // ====================================================
-    // ۳. افزودن/انتقال یک فایل از بخش «جزوه‌خوان» به پوشه «مقاله‌خوان»
+    // ۳. افزودن یک فایل از بخش «جزوه‌خوان» به «مقاله‌خوان»
     // ====================================================
     if ($action === 'import_from_booklets') {
         $source_pdf_id = (int)($_POST['pdf_id'] ?? 0);
@@ -416,8 +615,6 @@ try {
             exit;
         }
 
-        // اگر کاربر عادی است، چون سقف ۱ فایل دارد، همان فایل را به پوشه مقالات منتقل می‌کنیم تا به سقف نخورد
-        // اگر کاربر ویژه است، یک نسخه مستقل در پوشه uploads/papers/ برایش کپی می‌کنیم
         $new_filename = 'paper_u' . $user_id . '_' . time() . '_' . bin2hex(random_bytes(4)) . '.pdf';
         $dest_path    = $papers_dir . $new_filename;
         $db_rel_path  = 'uploads/papers/' . $new_filename;
@@ -428,13 +625,11 @@ try {
         }
 
         if (!$sub_info['is_vip']) {
-            // تبدیل رکورد فعلی به مقاله تا سهمیه ۱ فایل کاربر عادی حفظ شود
             @unlink($src_full_path);
             $upd = $pdo->prepare("UPDATE pdfs SET is_paper = 1, file_path = ?, category = 'مقاله علمی' WHERE id = ? AND user_id = ?");
             $upd->execute([$db_rel_path, $source_pdf_id, $user_id]);
             $target_id = $source_pdf_id;
         } else {
-            // ثبت رکورد جدید در لیست مقالات برای کاربر ویژه
             $ins = $pdo->prepare("
                 INSERT INTO pdfs (user_id, folder_id, is_paper, title, category, file_path, total_pages, last_page, starred_pages)
                 VALUES (?, NULL, 1, ?, 'مقاله علمی', ?, ?, 1, '[]')
@@ -452,17 +647,16 @@ try {
     }
 
     // ====================================================
-    // ۴. ترجمه هوشمند متن انتخاب‌شده (همراه با کش دیتابیس و انتخاب موتور)
+    // ۴. ترجمه، استخراج واژگان و خلاصه‌سازی هوشمند
     // ====================================================
     if ($action === 'translate') {
-        $raw_text       = $_POST['text'] ?? '';
-        $engine         = $_POST['engine'] ?? 'google'; // 'google', 'mymemory', 'ai'
-        $custom_api_key = trim($_POST['custom_api_key'] ?? '');
-        $custom_prov    = trim($_POST['custom_provider'] ?? '');
+        $raw_text  = $_POST['text'] ?? '';
+        $engine    = $_POST['engine'] ?? 'google';
+        $task_mode = $_POST['task_mode'] ?? 'translate';
 
         $clean_text = sanitize_pdf_english_text($raw_text);
         if (empty($clean_text)) {
-            echo json_encode(['status' => 'error', 'message' => 'متنی برای ترجمه انتخاب نشده است.']);
+            echo json_encode(['status' => 'error', 'message' => 'متنی برای پردازش انتخاب نشده است.']);
             exit;
         }
 
@@ -470,81 +664,85 @@ try {
             $clean_text = mb_substr($clean_text, 0, 4500, 'UTF-8');
         }
 
-        // ۱. بررسی کش دیتابیس (اگر قبلاً همین متن با همین موتور ترجمه شده باشد، فوری برگردانده شود)
         $source_hash = md5(strtolower($clean_text));
-        $cacheStmt = $pdo->prepare("SELECT translated_text FROM translation_cache WHERE source_hash = ? AND engine = ? LIMIT 1");
-        $cacheStmt->execute([$source_hash, $engine]);
+        $cache_engine_key = ($task_mode === 'summarize') ? 'ai_summary' : $engine;
+
+        // ۱. بررسی کش دیتابیس
+        $cacheStmt = $pdo->prepare("SELECT translated_text, keywords_json FROM translation_cache WHERE source_hash = ? AND engine = ? LIMIT 1");
+        $cacheStmt->execute([$source_hash, $cache_engine_key]);
         $cached_row = $cacheStmt->fetch();
 
         if ($cached_row && !empty($cached_row['translated_text'])) {
+            $cached_kw = !empty($cached_row['keywords_json']) ? json_decode($cached_row['keywords_json'], true) : [];
             echo json_encode([
                 'status'          => 'success',
+                'para_hash'       => $source_hash,
                 'clean_source'    => $clean_text,
                 'translated_text' => $cached_row['translated_text'],
-                'engine_used'     => $engine,
+                'keywords'        => is_array($cached_kw) ? $cached_kw : [],
+                'engine_used'     => ($task_mode === 'summarize') ? 'خلاصه‌ساز هوش مصنوعی' : $engine,
                 'cached'          => true
             ]);
             exit;
         }
 
-        // ۲. اجرای ترجمه بر اساس موتور انتخابی کاربر
-        $result = ['ok' => false, 'error' => 'موتور نامعتبر'];
-        $engine_used = $engine;
+        $used_fallback_due_to_overload = false;
 
-        if ($engine === 'ai') {
-            // بررسی اینکه آیا موتور هوش مصنوعی در config.php فعال است یا کاربر کلید شخصی داده است
-            $ai_master_enabled = defined('AI_TRANSLATION_ENABLED') ? (bool)AI_TRANSLATION_ENABLED : false;
-            if (!$ai_master_enabled && empty($custom_api_key)) {
-                echo json_encode([
-                    'status'  => 'error',
-                    'message' => 'موتور هوش مصنوعی سرور در حال حاضر غیرفعال است. لطفاً از موتور گوگل/MyMemory استفاده کنید یا کلید API شخصی خود را وارد نمایید.'
-                ]);
-                exit;
-            }
-
-            // اگر کاربر کلید شخصی نداده و می‌خواهد از کلید سرور استفاده کند، بررسی VIP بودن
-            if (empty($custom_api_key)) {
+        // ۲. پردازش با هوش مصنوعی یا موتورهای رایگان
+        if ($task_mode === 'summarize' || $engine === 'ai') {
+            $ai_enabled = defined('AI_TRANSLATION_ENABLED') ? (bool)AI_TRANSLATION_ENABLED : false;
+            if (!$ai_enabled) {
+                $result = translate_via_google_gtx($clean_text, 'en', 'fa');
+                $engine_used = 'google';
+            } else {
                 if (defined('AI_VIP_ONLY') && AI_VIP_ONLY && !$sub_info['is_vip']) {
                     echo json_encode([
                         'status'   => 'error',
                         'need_vip' => true,
-                        'message'  => 'استفاده از «مترجم تخصصی هوش مصنوعی (Academic AI)» مخصوص مشترکین ویژه است. برای استفاده رایگان می‌توانید از موتور Google یا MyMemory استفاده کنید و یا اشتراک ویژه تهیه نمایید.'
+                        'message'  => 'استفاده از «هوش مصنوعی آکادمیک و خلاصه‌ساز مقاله» مخصوص مشترکین ویژه (VIP) است. برای ترجمه رایگان می‌توانید از موتور Google یا MyMemory استفاده کنید.'
                     ]);
                     exit;
                 }
 
-                $active_key      = defined('AI_API_KEY') ? AI_API_KEY : '';
-                $active_provider = defined('AI_PROVIDER') ? AI_PROVIDER : 'gemini';
-                $active_model    = defined('AI_MODEL_NAME') ? AI_MODEL_NAME : 'gemini-2.5-flash';
-                $active_endpoint = defined('AI_OPENAI_ENDPOINT') ? AI_OPENAI_ENDPOINT : '';
-
-                if (empty($active_key) || $active_key === 'YOUR_AI_API_KEY') {
-                    echo json_encode([
-                        'status'  => 'error',
-                        'message' => 'کلید API هوش مصنوعی در تنظیمات سرور ثبت نشده است. می‌توانید در بخش تنظیمات بالای پنل، کلید رایگان Gemini خود را وارد کنید.'
-                    ]);
-                    exit;
+                $result = translate_via_ai_pool($clean_text, $task_mode);
+                if ($result['ok']) {
+                    $active_m = $result['model'] ?? 'AI';
+                    $engine_used = ($task_mode === 'summarize')
+                        ? "خلاصه‌ساز هوش مصنوعی ({$active_m})"
+                        : "هوش مصنوعی ({$active_m})";
+                } else {
+                    $used_fallback_due_to_overload = true;
+                    $fallback_tr = translate_via_google_gtx($clean_text, 'en', 'fa');
+                    if ($fallback_tr['ok']) {
+                        $extracted_kw = extract_fallback_academic_keywords($clean_text);
+                        if ($task_mode === 'summarize') {
+                            $result = [
+                                'ok'       => true,
+                                'text'     => "• نکته کلیدی این بخش:\n" . $fallback_tr['text'],
+                                'keywords' => $extracted_kw
+                            ];
+                            $engine_used = 'موتور پشتیبان (ترافیک بالای سرور AI)';
+                        } else {
+                            $result = [
+                                'ok'       => true,
+                                'text'     => $fallback_tr['text'],
+                                'keywords' => $extracted_kw
+                            ];
+                            $engine_used = 'گوگل (پشتیبان در زمان شلوغی سرور AI)';
+                        }
+                    }
                 }
-            } else {
-                // استفاده از کلید شخصی وارد شده توسط خود کاربر (BYOK)
-                $active_key      = $custom_api_key;
-                $active_provider = in_array($custom_prov, ['gemini', 'openai']) ? $custom_prov : 'gemini';
-                $active_model    = ($active_provider === 'gemini') ? 'gemini-2.5-flash' : 'gpt-4o-mini';
-                $active_endpoint = 'https://api.openai.com/v1/chat/completions';
             }
-
-            $result = translate_via_ai_engine($clean_text, $active_provider, $active_key, $active_model, $active_endpoint);
         } elseif ($engine === 'mymemory') {
             $result = translate_via_mymemory($clean_text, 'en', 'fa');
-            // اگر MyMemory به سقف روزانه خورد، خودکار از Google GTX کمک بگیرد
+            $engine_used = 'mymemory';
             if (!$result['ok']) {
                 $result = translate_via_google_gtx($clean_text, 'en', 'fa');
-                $engine_used = 'google (پشتیبان خودکار)';
+                $engine_used = 'گوگل (پشتیبان خودکار)';
             }
         } else {
-            // موتور پیش‌فرض: Google Translate GTX
             $result = translate_via_google_gtx($clean_text, 'en', 'fa');
-            // اگر گوگل پاسخ نداد، خودکار به MyMemory سوییچ کند
+            $engine_used = 'google';
             if (!$result['ok']) {
                 $result = translate_via_mymemory($clean_text, 'en', 'fa');
                 $engine_used = 'mymemory (پشتیبان خودکار)';
@@ -554,25 +752,37 @@ try {
         if (!$result['ok']) {
             echo json_encode([
                 'status'  => 'error',
-                'message' => 'خطا در ترجمه: ' . ($result['error'] ?? 'ارتباط با سرور ترجمه برقرار نشد.')
+                'message' => 'خطا در پردازش: ' . ($result['error'] ?? 'ارتباط با سرور ترجمه برقرار نشد.')
             ]);
             exit;
         }
 
-        // ۳. ذخیره در کش دیتابیس برای استفاده‌های بعدی
-        try {
-            $insCache = $pdo->prepare("
-                INSERT INTO translation_cache (source_hash, engine, source_text, translated_text)
-                VALUES (?, ?, ?, ?)
-                ON DUPLICATE KEY UPDATE translated_text = VALUES(translated_text)
-            ");
-            $insCache->execute([$source_hash, $engine, $clean_text, $result['text']]);
-        } catch (Exception $ignore) {}
+        $keywords = $result['keywords'] ?? [];
+
+        // ۳. ذخیره در کش دیتابیس
+        if (!$used_fallback_due_to_overload) {
+            try {
+                $insCache = $pdo->prepare("
+                    INSERT INTO translation_cache (source_hash, engine, source_text, translated_text, keywords_json)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON DUPLICATE KEY UPDATE translated_text = VALUES(translated_text), keywords_json = VALUES(keywords_json)
+                ");
+                $insCache->execute([
+                    $source_hash,
+                    $cache_engine_key,
+                    $clean_text,
+                    $result['text'],
+                    json_encode($keywords, JSON_UNESCAPED_UNICODE)
+                ]);
+            } catch (Exception $ignore) {}
+        }
 
         echo json_encode([
             'status'          => 'success',
+            'para_hash'       => $source_hash,
             'clean_source'    => $clean_text,
             'translated_text' => $result['text'],
+            'keywords'        => $keywords,
             'engine_used'     => $engine_used,
             'cached'          => false
         ]);
@@ -580,15 +790,15 @@ try {
     }
 
     // ====================================================
-    // ۵. مدیریت فیش‌های پژوهشی مقاله (ذخیره، لیست و حذف فیش‌های ترجمه‌شده)
+    // ۵. مدیریت فیش‌های پژوهشی مقاله
     // ====================================================
     if ($action === 'list_notes') {
         $pdf_id = (int)($_GET['pdf_id'] ?? 0);
         $stmt = $pdo->prepare("
-            SELECT id, page_number, original_text, translated_text, user_comment, created_at
+            SELECT id, page_number, para_hash, original_text, translated_text, user_comment, created_at
             FROM paper_notes
             WHERE user_id = ? AND pdf_id = ?
-            ORDER BY page_number ASC, id DESC
+            ORDER BY page_number ASC, id ASC
         ");
         $stmt->execute([$user_id, $pdf_id]);
         echo json_encode(['status' => 'success', 'notes' => $stmt->fetchAll()]);
@@ -598,9 +808,10 @@ try {
     if ($action === 'save_note') {
         $pdf_id          = (int)($_POST['pdf_id'] ?? 0);
         $page_number     = max(1, (int)($_POST['page_number'] ?? 1));
-        $original_text   = trim($_POST['original_text'] ?? '');
+        $original_text   = sanitize_pdf_english_text($_POST['original_text'] ?? '');
         $translated_text = trim($_POST['translated_text'] ?? '');
         $user_comment    = trim($_POST['user_comment'] ?? '');
+        $para_hash       = !empty($_POST['para_hash']) ? trim($_POST['para_hash']) : md5(strtolower($original_text));
 
         if ($pdf_id <= 0 || empty($translated_text)) {
             echo json_encode(['status' => 'error', 'message' => 'اطلاعات فیش ناقص است.']);
@@ -608,15 +819,16 @@ try {
         }
 
         $stmt = $pdo->prepare("
-            INSERT INTO paper_notes (user_id, pdf_id, page_number, original_text, translated_text, user_comment)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO paper_notes (user_id, pdf_id, page_number, para_hash, original_text, translated_text, user_comment)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
         ");
-        $stmt->execute([$user_id, $pdf_id, $page_number, $original_text, $translated_text, $user_comment]);
+        $stmt->execute([$user_id, $pdf_id, $page_number, $para_hash, $original_text, $translated_text, $user_comment]);
 
         echo json_encode([
-            'status'  => 'success',
-            'message' => 'در دفترچه فیش‌های این مقاله ذخیره شد.',
-            'note_id' => (int)$pdo->lastInsertId()
+            'status'    => 'success',
+            'message'   => 'در دفترچه فیش‌های این مقاله ذخیره شد.',
+            'note_id'   => (int)$pdo->lastInsertId(),
+            'para_hash' => $para_hash
         ]);
         exit;
     }

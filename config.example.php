@@ -13,7 +13,7 @@ define('DB_PASS', '');          // رمز عبور دیتابیس هاست
 // ==========================================
 // ۲. تنظیمات اشتراک ویژه و فروش تلگرام
 // ==========================================
-define('TELEGRAM_SALES_ID', 'YourTelegramID'); // آیدی تلگرام خود را بدون @ وارد کنید
+define('TELEGRAM_SALES_ID', 'YourTelegramID'); // آیدی تلگرام فروش بدون @
 define('FREE_MAX_PDF_COUNT', 1);               // حداکثر تعداد PDF برای کاربر عادی (۱ فایل)
 define('FREE_MAX_PDF_MB', 3);                  // حداکثر حجم هر PDF برای کاربر عادی (۳ مگابایت)
 define('VIP_MAX_PDF_MB', 64);                  // حداکثر حجم هر PDF برای کاربر ویژه (۶۴ مگابایت)
@@ -30,14 +30,21 @@ define('SMSIR_PARAM_NAME', 'NAME');
 define('SMSIR_PARAM_TASK', 'TASK');
 
 // ==========================================
-// ۴. تنظیمات مقاله‌خوان و موتور ترجمه هوش مصنوعی (AI)
+// ۴. تنظیمات مقاله‌خوان و استخر چرخشی کلیدهای هوش مصنوعی (Multi-Key Pool)
 // ==========================================
-define('AI_TRANSLATION_ENABLED', true);        // true = فعال بودن گزینه هوش مصنوعی | false = غیرفعال کردن کامل هوش مصنوعی
-define('AI_VIP_ONLY', true);                   // true = استفاده از کلید هوش مصنوعی سرور فقط مخصوص کاربران VIP باشد
-define('AI_PROVIDER', 'gemini');               // 'gemini' (گوگل) یا 'openai' (سازگار با OpenAI / OpenRouter / DeepSeek / Groq)
-define('AI_API_KEY', 'YOUR_AI_API_KEY');       // کلید API هوش مصنوعی سرور (از Google AI Studio یا OpenRouter)
-define('AI_MODEL_NAME', 'gemini-2.5-flash');   // نام مدل (مثلاً gemini-2.5-flash یا gpt-4o-mini یا deepseek-chat)
-define('AI_OPENAI_ENDPOINT', 'https://api.openai.com/v1/chat/completions'); // آدرس Endpoint در صورت انتخاب حالت openai
+define('AI_TRANSLATION_ENABLED', true);      // true = فعال بودن هوش مصنوعی | false = غیرفعال کردن کامل
+define('AI_VIP_ONLY', true);                 // true = هوش مصنوعی مخصوص کاربران ویژه (VIP) باشد
+define('AI_PROVIDER', 'gemini');             // 'gemini' (پیشنهادی) یا 'openai' (سازگار با Groq / OpenRouter / DeepSeek)
+define('AI_MODEL_NAME', 'gemini-3.7-flash'); // نام مدل هوش مصنوعی
+define('AI_OPENAI_ENDPOINT', 'https://api.openai.com/v1/chat/completions');
+
+// لیست چرخشی کلیدهای API شما (می‌توانید ۱ تا ۱۰+ کلید رایگان جمینای قرار دهید تا ترافیک بین آن‌ها تقسیم شود)
+define('AI_API_KEYS', [
+    'YOUR_GEMINI_API_KEY_1',
+    'YOUR_GEMINI_API_KEY_2',
+    'YOUR_GEMINI_API_KEY_3',
+    // در صورت نیاز کلیدهای بیشتر را در خط‌های بعدی اضافه کنید
+]);
 
 try {
     $pdo = new PDO(
@@ -55,7 +62,7 @@ try {
 }
 
 // ==========================================
-// ۵. ارتقای خودکار دیتابیس (اشتراک + مقاله‌خوان + کش ترجمه)
+// ۵. ارتقای خودکار جداول و ستون‌های دیتابیس
 // ==========================================
 try {
     $uCols = $pdo->query("SHOW COLUMNS FROM `users`")->fetchAll(PDO::FETCH_COLUMN);
@@ -70,13 +77,11 @@ try {
         $pdo->exec("ALTER TABLE `users` ADD COLUMN `vip_expires_at` datetime DEFAULT NULL AFTER `is_admin`");
     }
 
-    // افزودن ستون تفکیک مقالات انگلیسی (is_paper) به جدول pdfs
     $pCols = $pdo->query("SHOW COLUMNS FROM `pdfs`")->fetchAll(PDO::FETCH_COLUMN);
     if (!in_array('is_paper', $pCols)) {
         $pdo->exec("ALTER TABLE `pdfs` ADD COLUMN `is_paper` tinyint(1) DEFAULT 0 COMMENT '0=جزوه درسی, 1=مقاله انگلیسی' AFTER `folder_id`");
     }
 
-    // جدول کدهای فعال‌سازی اشتراک
     $pdo->exec("
         CREATE TABLE IF NOT EXISTS `subscription_codes` (
           `id` int(11) NOT NULL AUTO_INCREMENT,
@@ -91,27 +96,34 @@ try {
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_persian_ci;
     ");
 
-    // جدول کش هوشمند ترجمه‌ها (برای جلوگیری از مصرف تکراری API)
+    // جدول کش هوشمند ترجمه‌ها، واژگان تخصصی و خلاصه‌ها
     $pdo->exec("
         CREATE TABLE IF NOT EXISTS `translation_cache` (
           `id` int(11) NOT NULL AUTO_INCREMENT,
           `source_hash` char(32) NOT NULL,
-          `engine` varchar(20) NOT NULL,
+          `engine` varchar(30) NOT NULL,
           `source_text` text NOT NULL,
           `translated_text` text NOT NULL,
+          `keywords_json` text DEFAULT NULL,
           `created_at` timestamp DEFAULT CURRENT_TIMESTAMP,
           PRIMARY KEY (`id`),
           UNIQUE KEY `uniq_hash_engine` (`source_hash`, `engine`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_persian_ci;
     ");
 
-    // جدول ذخیره فیش‌ها و نکات ترجمه‌شده هر مقاله توسط کاربر
+    $tcCols = $pdo->query("SHOW COLUMNS FROM `translation_cache`")->fetchAll(PDO::FETCH_COLUMN);
+    if (!in_array('keywords_json', $tcCols)) {
+        $pdo->exec("ALTER TABLE `translation_cache` ADD COLUMN `keywords_json` text DEFAULT NULL AFTER `translated_text`");
+    }
+
+    // جدول ذخیره فیش‌های پژوهشی مقاله (به همراه para_hash برای متمایز کردن رنگ بند در PDF)
     $pdo->exec("
         CREATE TABLE IF NOT EXISTS `paper_notes` (
           `id` int(11) NOT NULL AUTO_INCREMENT,
           `user_id` int(11) NOT NULL,
           `pdf_id` int(11) NOT NULL,
           `page_number` int(11) NOT NULL DEFAULT 1,
+          `para_hash` char(32) DEFAULT NULL,
           `original_text` text NOT NULL,
           `translated_text` text NOT NULL,
           `user_comment` text DEFAULT NULL,
@@ -120,6 +132,11 @@ try {
           KEY `idx_user_paper_note` (`user_id`, `pdf_id`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_persian_ci;
     ");
+
+    $pnCols = $pdo->query("SHOW COLUMNS FROM `paper_notes`")->fetchAll(PDO::FETCH_COLUMN);
+    if (!in_array('para_hash', $pnCols)) {
+        $pdo->exec("ALTER TABLE `paper_notes` ADD COLUMN `para_hash` char(32) DEFAULT NULL AFTER `page_number`");
+    }
 } catch (Exception $ignore) {}
 
 // ==========================================

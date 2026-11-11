@@ -64,7 +64,7 @@ try {
         $pdo->exec("UPDATE `calendar_events` SET `is_study` = 0, `category_label` = 'متفرقه' WHERE `category_type` = 'misc' OR `color` = '#7c3aed'");
     }
     if (!in_array('send_sms', $eCols)) {
-        $pdo->exec("ALTER TABLE `calendar_events` ADD COLUMN `send_sms` tinyint(1) DEFAULT 1 AFTER `is_completed`");
+        $pdo->exec("ALTER TABLE `calendar_events` ADD COLUMN `send_sms` tinyint(1) DEFAULT 0 AFTER `is_completed`");
     }
     if (!in_array('sms_sent', $eCols)) {
         $pdo->exec("ALTER TABLE `calendar_events` ADD COLUMN `sms_sent` tinyint(1) DEFAULT 0 AFTER `send_sms`");
@@ -99,7 +99,7 @@ $initial_sub = function_exists('get_user_subscription_info')
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>داشبورد هوشمند مطالعه، تقویم و جزوه‌خوان کنکور v4.1</title>
+    <title>داشبورد هوشمند مطالعه، تقویم تعاملی و جزوه‌خوان کنکور v4.2</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css" rel="stylesheet">
     
@@ -109,7 +109,6 @@ $initial_sub = function_exists('get_user_subscription_info')
 
     <style>
         body { font-family: 'Vazirmatn', sans-serif; -webkit-tap-highlight-color: transparent; overscroll-behavior: none; }
-        .hour-row { height: 60px; }
         .calendar-scroll::-webkit-scrollbar { width: 5px; height: 5px; }
         .calendar-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
         .locked-day-pattern {
@@ -124,9 +123,62 @@ $initial_sub = function_exists('get_user_subscription_info')
         }
         .page-flip-anim { animation: pageFadeIn 0.18s ease-out; }
 
+        /* استایل کارت‌های تعاملی تقویم (پشتیبانی از Drag & Drop و Resize) */
+        .cal-event-card {
+            transition: box-shadow 0.12s ease, transform 0.1s ease;
+            touch-action: pan-y;
+        }
         .cal-event-card:hover {
             z-index: 35 !important;
             box-shadow: 0 10px 20px -5px rgba(0, 0, 0, 0.35);
+        }
+        .cal-event-card.dragging-active {
+            z-index: 50 !important;
+            opacity: 0.92 !important;
+            transform: scale(1.02);
+            box-shadow: 0 16px 32px -4px rgba(0, 0, 0, 0.45) !important;
+            outline: 2px dashed #ffffff;
+            cursor: grabbing !important;
+            transition: none !important;
+        }
+        .cal-resize-handle {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 11px;
+            cursor: ns-resize;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(to top, rgba(0,0,0,0.28), transparent);
+            touch-action: none;
+        }
+        .cal-resize-handle::after {
+            content: '';
+            width: 22px;
+            height: 3px;
+            border-radius: 999px;
+            background-color: rgba(255, 255, 255, 0.75);
+        }
+
+        /* باکس پیش‌نمایش انتخاب بازه زمانی با کشیدن روی فضای خالی تقویم (Drag-to-Create) */
+        .drag-create-ghost {
+            position: absolute;
+            left: 3px;
+            right: 3px;
+            background-color: rgba(79, 70, 229, 0.24);
+            border: 2px dashed #4f46e5;
+            border-radius: 8px;
+            z-index: 45;
+            pointer-events: none;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #1e1b4b;
+            font-weight: 800;
+            font-size: 11px;
+            box-shadow: 0 4px 12px rgba(79, 70, 229, 0.2);
         }
 
         /* قفل کردن کامل ابعاد و وسط‌چین کردن عمودی و افقی جزوه در صفحه موبایل */
@@ -154,7 +206,7 @@ $initial_sub = function_exists('get_user_subscription_info')
 <body class="bg-slate-100 text-slate-800 h-screen flex flex-col overflow-hidden select-none">
 
     <!-- ==================================================== -->
-    <!-- ۱. هدر اصلی سامانه (شامل لینک مقاله‌خوان، وضعیت اشتراک و پنل ادمین) -->
+    <!-- ۱. هدر اصلی سامانه -->
     <!-- ==================================================== -->
     <header id="main-app-header" class="bg-slate-900 text-white px-3 md:px-4 py-2 flex flex-wrap items-center justify-between gap-2 shadow-md z-30 shrink-0">
         <div class="flex items-center gap-2 md:gap-3">
@@ -197,7 +249,7 @@ $initial_sub = function_exists('get_user_subscription_info')
                 <span id="header-timer-badge" class="hidden xl:inline">تایمر</span>
             </button>
 
-            <button type="button" onclick="openPhoneModal()" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-sky-300 px-2 py-1.5 rounded-lg font-bold flex items-center gap-1 transition" title="تنظیمات پیامک یادآوری sms.ir">
+            <button type="button" onclick="openPhoneModal()" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-sky-300 px-2 py-1.5 rounded-lg font-bold flex items-center gap-1 transition" title="تنظیمات سامانه پیامکی یادآوری">
                 <span>📱</span>
                 <span class="hidden xl:inline">پیامک</span>
             </button>
@@ -211,12 +263,13 @@ $initial_sub = function_exists('get_user_subscription_info')
     </header>
 
     <!-- ==================================================== -->
-    <!-- ۲. بخش اول: تقویم هفتگی و روزانه هوشمند -->
+    <!-- ۲. بخش اول: تقویم هفتگی و روزانه تعاملی (Drag & Drop + Drag-to-Create) -->
     <!-- ==================================================== -->
     <main id="section-calendar" class="flex-1 flex flex-col overflow-hidden">
         
-        <div class="bg-slate-800 text-slate-200 px-3 py-1.5 flex items-center justify-between gap-3 overflow-x-auto text-[11px] md:text-xs shrink-0 border-b border-slate-700">
-            <div class="flex items-center gap-3 md:gap-5 shrink-0">
+        <!-- نوار آمار + دکمه‌های کارنامه هفته و برنامه‌های عقب‌افتاده -->
+        <div class="bg-slate-800 text-slate-200 px-3 py-1.5 flex items-center justify-between gap-2 overflow-x-auto text-[11px] md:text-xs shrink-0 border-b border-slate-700">
+            <div class="flex items-center gap-2 md:gap-4 shrink-0">
                 <div class="flex items-center gap-1 bg-slate-900/70 px-2 py-0.5 rounded-md border border-slate-700">
                     <span class="text-slate-400">📚 برنامه درسی:</span>
                     <span id="stat-planned-hours" class="font-extrabold text-white">0 ساعت</span>
@@ -226,7 +279,7 @@ $initial_sub = function_exists('get_user_subscription_info')
                     <span id="stat-completed-hours" class="font-extrabold text-emerald-400">0 ساعت</span>
                 </div>
                 <div class="flex items-center gap-1 bg-purple-950/60 px-2 py-0.5 rounded-md border border-purple-700/50">
-                    <span class="text-purple-300">🧩 کارهای متفرقه:</span>
+                    <span class="text-purple-300">🧩 متفرقه:</span>
                     <span id="stat-misc-hours" class="font-extrabold text-purple-200">0 از 0 ساعت</span>
                 </div>
                 <div class="flex items-center gap-1">
@@ -234,12 +287,20 @@ $initial_sub = function_exists('get_user_subscription_info')
                     <span id="stat-avg-percent" class="font-extrabold text-amber-300">---</span>
                 </div>
             </div>
-            <div class="flex items-center gap-1 shrink-0">
-                <span class="text-slate-400 hidden lg:inline">پیشرفت درسی کل:</span>
+
+            <div class="flex items-center gap-1.5 shrink-0">
+                <button type="button" onclick="openOverdueModal()" id="btn-overdue-backlog" class="hidden items-center gap-1 bg-rose-600/90 hover:bg-rose-600 text-white px-2 py-0.5 rounded-md font-extrabold text-[11px] transition shadow-2xs">
+                    <span>⚠️ عقب‌افتاده:</span>
+                    <span id="overdue-count-badge">0</span>
+                </button>
+                <button type="button" onclick="openAnalyticsModal()" class="bg-indigo-600/90 hover:bg-indigo-500 text-white px-2.5 py-0.5 rounded-md font-extrabold text-[11px] flex items-center gap-1 transition">
+                    <span>📊 کارنامه هفته</span>
+                </button>
                 <span id="stat-progress-text" class="font-extrabold text-indigo-300 bg-indigo-950/80 px-2 py-0.5 rounded-md border border-indigo-700">0%</span>
             </div>
         </div>
 
+        <!-- نوار کنترل تقویم -->
         <div class="bg-white border-b border-slate-200 px-3 py-2 flex flex-wrap items-center justify-between gap-2 shrink-0">
             <div class="flex items-center gap-1.5">
                 <button type="button" onclick="navigateCalendar(-1)" class="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs font-bold transition">❮</button>
@@ -248,7 +309,7 @@ $initial_sub = function_exists('get_user_subscription_info')
                 <h2 id="calendar-range-title" class="text-xs md:text-sm font-extrabold text-slate-800 mr-1"></h2>
             </div>
 
-            <div class="flex flex-wrap items-center gap-1.5 md:gap-2">
+            <div class="flex flex-wrap items-center gap-1.5">
                 <div class="flex bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-[11px]">
                     <button type="button" id="filter-all" onclick="setCalendarFilter('all')" class="px-2 py-1 rounded-md font-bold bg-white shadow-2xs text-slate-800">همه</button>
                     <button type="button" id="filter-study" onclick="setCalendarFilter('study')" class="px-2 py-1 rounded-md font-bold text-slate-600">📚 درسی</button>
@@ -264,6 +325,10 @@ $initial_sub = function_exists('get_user_subscription_info')
                     </button>
                 </div>
 
+                <button type="button" id="btn-grid-zoom" onclick="toggleCalendarRowZoom()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-2 py-1.5 rounded-lg text-xs font-bold transition" title="تغییر ارتفاع ساعات تقویم برای برنامه‌های کوتاه">
+                    🔍 <span class="hidden lg:inline">نمای باز</span>
+                </button>
+
                 <button type="button" onclick="openCopyDayModal()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-2.5 py-1.5 rounded-lg text-xs font-bold transition" title="کپی کردن برنامه‌های یک روز به روزی دیگر">
                     📋 <span class="hidden sm:inline">کپی روز</span>
                 </button>
@@ -272,6 +337,12 @@ $initial_sub = function_exists('get_user_subscription_info')
                     + ثبت برنامه
                 </button>
             </div>
+        </div>
+
+        <!-- راهنمای باریک تعاملی -->
+        <div class="bg-indigo-50/80 border-b border-indigo-100 px-3 py-1 text-[10px] md:text-[11px] text-indigo-900 font-bold flex items-center justify-between shrink-0">
+            <span>💡 <b>تعامل سریع:</b> روی فضای خالی بکشید تا بازه زمانی ساخته شود؛ یا هر برنامه را با موس/نگه‌داشتن انگشت به ساعت و روز دلخواه بکشید!</span>
+            <span id="live-drag-status-pill" class="hidden bg-indigo-600 text-white px-2 py-0.5 rounded-full text-[10px] font-extrabold animate-pulse"></span>
         </div>
 
         <div id="mobile-week-strip" class="hidden bg-slate-50 border-b border-slate-200 px-2 py-1.5 grid-cols-7 gap-1 shrink-0"></div>
@@ -314,7 +385,6 @@ $initial_sub = function_exists('get_user_subscription_info')
 
         <div class="flex-1 flex flex-col overflow-hidden relative bg-slate-800">
             
-            <!-- نوار بالای جزوه‌خوان -->
             <div id="pdf-top-bar" class="bg-slate-900/95 text-white border-b border-slate-700 px-2.5 py-1.5 flex items-center justify-between gap-2 shrink-0 z-20">
                 <div class="flex items-center gap-1.5 min-w-0">
                     <button type="button" onclick="togglePdfSidebar()" class="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-xs font-bold text-white shrink-0 shadow-xs">
@@ -347,7 +417,6 @@ $initial_sub = function_exists('get_user_subscription_info')
                 </button>
             </div>
 
-            <!-- دکمه شناور خروج از حالت کاملاً فول‌صفحه -->
             <button type="button" id="floating-exit-fullscreen-btn" onclick="toggleFullScreenReader()" class="hidden fixed top-3 right-3 z-50 bg-rose-600/90 hover:bg-rose-600 text-white px-3 py-1.5 rounded-full shadow-2xl border border-white/30 text-xs font-extrabold items-center gap-1 backdrop-blur-xs transition">
                 <span>✕ خروج از فول‌صفحه</span>
             </button>
@@ -374,14 +443,12 @@ $initial_sub = function_exists('get_user_subscription_info')
                     </div>
                 </div>
 
-                <!-- بوم رندر PDF + لایه علامت‌گذاری -->
                 <div id="pdf-canvas-wrapper" dir="ltr" class="hidden relative shadow-2xl bg-white shrink-0">
                     <canvas id="pdf-render-canvas" dir="ltr" class="block"></canvas>
                     <canvas id="pdf-annot-canvas" dir="ltr" class="absolute inset-0 pointer-events-none"></canvas>
                 </div>
             </div>
 
-            <!-- کنترل شناور ورق زدن صفحه در پایین راست -->
             <div id="pdf-floating-bottom-bar" class="hidden fixed bottom-4 right-4 z-30 items-center gap-1.5">
                 <button type="button" onclick="changePdfPage(-1)" class="w-9 h-9 rounded-full bg-slate-900/90 text-white shadow-lg border border-slate-700 font-bold text-sm flex items-center justify-center">❮</button>
                 <span id="floating-page-pill" class="bg-slate-900/90 text-white px-3 py-1.5 rounded-full text-xs font-bold shadow-lg border border-slate-700">
@@ -390,16 +457,13 @@ $initial_sub = function_exists('get_user_subscription_info')
                 <button type="button" onclick="changePdfPage(1)" class="w-9 h-9 rounded-full bg-slate-900/90 text-white shadow-lg border border-slate-700 font-bold text-sm flex items-center justify-center">❯</button>
             </div>
 
-            <!-- دکمه شناور باز کردن جعبه ابزار پیشرفته در پایین چپ -->
             <button type="button" id="pdf-fab-btn" onclick="toggleToolsPopup()" class="hidden fixed bottom-4 left-4 z-40 bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2.5 rounded-full shadow-2xl font-extrabold text-xs items-center gap-1.5 border-2 border-white/20 transition transform active:scale-95">
                 <span id="fab-active-icon">✋</span>
                 <span>ابزارها و قلم‌ها</span>
                 <span id="fab-color-dot" class="w-3 h-3 rounded-full border border-white" style="background-color: #facc15;"></span>
             </button>
 
-            <!-- ==================================================== -->
             <!-- پاپ‌آپ جعبه ابزار پیشرفته جزوه‌خوان -->
-            <!-- ==================================================== -->
             <div id="pdf-tools-popup" class="hidden fixed bottom-16 left-4 z-40 bg-slate-900/95 text-white p-3.5 rounded-2xl shadow-2xl border border-slate-700 w-80 max-w-[94vw] max-h-[82vh] overflow-y-auto calendar-scroll backdrop-blur-md space-y-3 text-xs">
                 <div class="flex items-center justify-between border-b border-slate-700 pb-2">
                     <span class="font-extrabold text-slate-200">🛠️ استودیو حاشیه‌نویسی جزوه</span>
@@ -409,7 +473,6 @@ $initial_sub = function_exists('get_user_subscription_info')
                     </div>
                 </div>
 
-                <!-- ۱. انتخاب ابزار -->
                 <div class="grid grid-cols-2 gap-1.5">
                     <button type="button" onclick="setAnnotTool('pan', true)" id="tool-pan" class="annot-tool-btn px-2.5 py-2 rounded-xl font-bold bg-indigo-600 text-white flex items-center gap-1.5">
                         <span>✋</span><span>مطالعه / زوم</span>
@@ -434,7 +497,6 @@ $initial_sub = function_exists('get_user_subscription_info')
                     </button>
                 </div>
 
-                <!-- ۲. پالت رنگ گسترده -->
                 <div class="bg-slate-800 p-2.5 rounded-xl space-y-2">
                     <div class="flex items-center justify-between text-[11px] text-slate-300 font-bold">
                         <span>🎨 رنگ قلم / ماژیک:</span>
@@ -461,7 +523,6 @@ $initial_sub = function_exists('get_user_subscription_info')
                     </div>
                 </div>
 
-                <!-- ۳. انتخاب ضخامت نوک قلم / ماژیک -->
                 <div class="bg-slate-800 p-2 rounded-xl flex items-center justify-between">
                     <span class="text-[11px] text-slate-300 font-bold">📏 ضخامت قلم:</span>
                     <div class="flex items-center gap-1">
@@ -472,7 +533,6 @@ $initial_sub = function_exists('get_user_subscription_info')
                     </div>
                 </div>
 
-                <!-- ۴. بزرگ‌نمایی، فول‌صفحه و حالت شب -->
                 <div class="grid grid-cols-4 gap-1.5 pt-1 border-t border-slate-700">
                     <button type="button" onclick="adjustZoom(-0.2)" class="py-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg font-bold text-center">➖ زوم</button>
                     <button type="button" onclick="setFitWidthZoom()" class="py-1.5 bg-indigo-950 text-indigo-300 border border-indigo-700 rounded-lg font-bold text-center">↔ عرض</button>
@@ -480,10 +540,9 @@ $initial_sub = function_exists('get_user_subscription_info')
                     <button type="button" onclick="togglePdfDarkMode()" id="btn-pdf-dark" class="py-1.5 bg-slate-800 text-amber-300 hover:bg-slate-700 rounded-lg font-bold text-center">🌙 شب</button>
                 </div>
 
-                <!-- ۵. واگرد، پاکسازی صفحه و دانلود عکس صفحه با دست‌خط‌ها -->
                 <div class="grid grid-cols-3 gap-1.5 pt-1 border-t border-slate-700">
                     <button type="button" onclick="undoLastAnnotation()" class="py-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg font-bold text-slate-200 text-center">↩ واگرد</button>
-                    <button type="button" onclick="downloadAnnotatedPageImage()" class="py-1.5 bg-emerald-900/80 hover:bg-emerald-700 text-emerald-200 rounded-lg font-bold text-center" title="ذخیره تصویر این صفحه به همراه هایلایت‌ها و دست‌خط‌ها">📸 عکس صفحه</button>
+                    <button type="button" onclick="downloadAnnotatedPageImage()" class="py-1.5 bg-emerald-900/80 hover:bg-emerald-700 text-emerald-200 rounded-lg font-bold text-center">📸 عکس صفحه</button>
                     <button type="button" onclick="clearAllPageAnnotations()" class="py-1.5 bg-rose-950/80 hover:bg-rose-700 text-rose-200 rounded-lg font-bold text-center">🗑️ پاکسازی</button>
                 </div>
             </div>
@@ -526,7 +585,7 @@ $initial_sub = function_exists('get_user_subscription_info')
     </div>
 
     <!-- ==================================================== -->
-    <!-- ۵. مودال ثبت و ویرایش برنامه تقویم -->
+    <!-- ۵. مودال ثبت و ویرایش برنامه تقویم (با تیک پیامک پیش‌فرض غیرفعال و دکمه کپی تسک) -->
     <!-- ==================================================== -->
     <div id="event-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs hidden items-end sm:items-center justify-center sm:p-4 z-50">
         <div class="bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-lg max-h-[94vh] flex flex-col overflow-hidden">
@@ -605,8 +664,9 @@ $initial_sub = function_exists('get_user_subscription_info')
                     </div>
                     <div class="flex items-center pt-2 sm:pt-4">
                         <label onclick="handleSmsCheckboxClick(event)" class="flex items-center gap-1.5 cursor-pointer select-none">
+                            <!-- تیک پیامک یادآوری به صورت پیش‌فرض غیرفعال است -->
                             <input type="checkbox" id="ev-send-sms" name="send_sms" value="1" class="w-4 h-4 accent-indigo-600 rounded">
-                            <span class="text-slate-700 font-bold text-[11px]">📱 پیامک یادآوری عدم انجام</span>
+                            <span class="text-slate-700 font-bold text-[11px]">📱 ارسال پیامک یادآوری عدم انجام</span>
                             <span id="sms-vip-lock-badge" class="hidden bg-amber-100 text-amber-800 border border-amber-300 px-1.5 py-0.5 rounded text-[9px] font-extrabold">🔒 ویژه</span>
                         </label>
                     </div>
@@ -652,12 +712,16 @@ $initial_sub = function_exists('get_user_subscription_info')
                     <textarea id="ev-desc" name="description" rows="2" placeholder="شماره تست‌ها یا نکات..." class="w-full px-3 py-1.5 border border-slate-300 rounded-lg"></textarea>
                 </div>
 
-                <div id="edit-extra-actions" class="hidden grid grid-cols-2 gap-2 pt-1">
+                <!-- دکمه‌های عملیات سریع در حالت ویرایش (کپی تسک، انتقال به فردا، تایمر) -->
+                <div id="edit-extra-actions" class="hidden grid grid-cols-3 gap-1.5 pt-1">
+                    <button type="button" onclick="duplicateCurrentEvent()" class="py-1.5 px-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg font-bold text-[11px] flex items-center justify-center gap-1">
+                        <span>📑 کپی برنامه</span>
+                    </button>
                     <button type="button" onclick="moveCurrentEventToTomorrow()" class="py-1.5 px-2 bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 rounded-lg font-bold text-[11px] flex items-center justify-center gap-1">
-                        <span>⏭️ انتقال برنامه به فردا</span>
+                        <span>⏭️ انتقال به فردا</span>
                     </button>
                     <button type="button" onclick="startPomodoroForCurrentEvent()" class="py-1.5 px-2 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-lg font-bold text-[11px] flex items-center justify-center gap-1">
-                        <span>▶️ شروع تایمر برای این برنامه</span>
+                        <span>▶️ شروع تایمر</span>
                     </button>
                 </div>
 
@@ -685,7 +749,65 @@ $initial_sub = function_exists('get_user_subscription_info')
     </div>
 
     <!-- ==================================================== -->
-    <!-- ۶. مودال خرید و تمدید اشتراک ویژه (VIP) -->
+    <!-- ۶. مودال جدید: کارنامه و نمودار تحلیلی هفته (📊 Weekly Analytics) -->
+    <!-- ==================================================== -->
+    <div id="analytics-modal" class="fixed inset-0 bg-slate-900/65 backdrop-blur-xs hidden items-center justify-center p-4 z-50">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden text-xs">
+            <div class="bg-slate-900 text-white px-4 py-3 flex items-center justify-between">
+                <h3 class="font-extrabold text-sm flex items-center gap-1.5">📊 کارنامه و نمودار تحلیلی این هفته</h3>
+                <button type="button" onclick="closeAnalyticsModal()" class="text-slate-400 hover:text-white text-xl leading-none">&times;</button>
+            </div>
+            <div class="p-4 space-y-4 max-h-[82vh] overflow-y-auto calendar-scroll">
+                <div class="grid grid-cols-3 gap-2 text-center">
+                    <div class="bg-indigo-50 border border-indigo-100 p-2.5 rounded-xl">
+                        <div class="text-[10px] text-indigo-600 font-bold">کل برنامه درسی هفته</div>
+                        <div id="an-total-planned" class="text-base font-black text-indigo-950 mt-0.5">0 ساعت</div>
+                    </div>
+                    <div class="bg-emerald-50 border border-emerald-100 p-2.5 rounded-xl">
+                        <div class="text-[10px] text-emerald-700 font-bold">مطالعه واقعی انجام‌شده</div>
+                        <div id="an-total-done" class="text-base font-black text-emerald-700 mt-0.5">0 ساعت</div>
+                    </div>
+                    <div class="bg-amber-50 border border-amber-100 p-2.5 rounded-xl">
+                        <div class="text-[10px] text-amber-800 font-bold">بهره‌وری اجرای برنامه</div>
+                        <div id="an-efficiency" class="text-base font-black text-amber-900 mt-0.5">0%</div>
+                    </div>
+                </div>
+
+                <!-- نمودار میله‌ای روزهای شنبه تا جمعه -->
+                <div class="bg-slate-50 p-3.5 rounded-2xl border border-slate-200">
+                    <div class="font-extrabold text-slate-700 mb-3 text-[11px]">📅 نمودار ساعات مطالعه روزهای هفته (سبز = انجام‌شده | خاکستری = برنامه‌ریزی‌شده):</div>
+                    <div id="an-daily-bars" class="grid grid-cols-7 gap-2 items-end h-36 pt-4 border-b border-slate-300 px-1"></div>
+                </div>
+
+                <!-- تفکیک ساعات بر اساس نوع درس / دسته‌بندی -->
+                <div class="bg-slate-50 p-3.5 rounded-2xl border border-slate-200 space-y-2">
+                    <div class="font-extrabold text-slate-700 text-[11px]">🗂️ تفکیک ساعات مطالعه بر اساس نوع برنامه:</div>
+                    <div id="an-category-breakdown" class="space-y-2"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================================================== -->
+    <!-- ۷. مودال جدید: لیست برنامه‌های عقب‌افتاده (⚠️ Overdue Backlog) -->
+    <!-- ==================================================== -->
+    <div id="overdue-modal" class="fixed inset-0 bg-slate-900/65 backdrop-blur-xs hidden items-center justify-center p-4 z-50">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden text-xs">
+            <div class="bg-rose-950 text-white px-4 py-3 flex items-center justify-between">
+                <h3 class="font-extrabold text-sm flex items-center gap-1.5">⚠️ برنامه‌های درسی عقب‌افتاده (تیک‌نخورده)</h3>
+                <button type="button" onclick="closeOverdueModal()" class="text-rose-200 hover:text-white text-xl leading-none">&times;</button>
+            </div>
+            <div class="p-4 space-y-3">
+                <p class="text-slate-600 text-[11px] leading-relaxed">
+                    زمان این برنامه‌های درسی گذشته اما هنوز تیک انجام آن‌ها زده نشده است. می‌توانید با یک کلیک آن‌ها را تیک بزنید یا به «امروز» / «فردا» منتقل کنید:
+                </p>
+                <div id="overdue-list-container" class="max-h-80 overflow-y-auto space-y-2 calendar-scroll"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================================================== -->
+    <!-- ۸. مودال خرید و تمدید اشتراک ویژه (VIP) - بدون ذکر نام سرویس‌دهنده پیامک -->
     <!-- ==================================================== -->
     <div id="subscription-modal" class="fixed inset-0 bg-slate-900/75 backdrop-blur-xs hidden items-end sm:items-center justify-center sm:p-4 z-50">
         <div class="bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-2xl max-h-[94vh] flex flex-col overflow-hidden">
@@ -723,8 +845,8 @@ $initial_sub = function_exists('get_user_subscription_info')
                         <div class="bg-white p-2.5 rounded-xl border border-slate-200 flex items-start gap-2">
                             <span class="text-base">📱</span>
                             <div>
-                                <div class="font-extrabold text-slate-800">پیامک هوشمند پیگیری برنامه (sms.ir)</div>
-                                <div class="text-[11px] text-slate-500 mt-0.5">ارسال خودکار پیامک خدماتی در صورت تیک نخوردن برنامه در تقویم.</div>
+                                <div class="font-extrabold text-slate-800">سامانه پیامکی هوشمند پیگیری برنامه</div>
+                                <div class="text-[11px] text-slate-500 mt-0.5">ارسال خودکار پیامک یادآوری به موبایل شما در صورت تیک نخوردن برنامه.</div>
                             </div>
                         </div>
                         <div class="bg-white p-2.5 rounded-xl border border-slate-200 flex items-start gap-2">
@@ -750,7 +872,7 @@ $initial_sub = function_exists('get_user_subscription_info')
                             </div>
                             <ul class="space-y-1.5 text-[11px] text-slate-600 mb-4">
                                 <li>✓ آپلود نامحدود فایل PDF (تا <?php echo VIP_MAX_PDF_MB; ?> مگابایت)</li>
-                                <li>✓ فعال‌سازی پنل پیامک یادآوری تقویم</li>
+                                <li>✓ فعال‌سازی سامانه پیامکی یادآوری تقویم</li>
                                 <li>✓ دسترسی کامل به هوش مصنوعی مقاله‌خوان</li>
                             </ul>
                         </div>
@@ -776,7 +898,7 @@ $initial_sub = function_exists('get_user_subscription_info')
                             <ul class="space-y-1.5 text-[11px] text-slate-700 mb-4">
                                 <li>✓ <b>۲۰٪ به‌صرفه‌تر</b> (ماهیانه فقط ۴۰۰ هزار تومان)</li>
                                 <li>✓ آپلود نامحدود فایل PDF + تمام پوشه‌ها</li>
-                                <li>✓ پیامک یادآوری + هوش مصنوعی مقاله‌خوان</li>
+                                <li>✓ سامانه پیامکی یادآوری + هوش مصنوعی مقاله‌خوان</li>
                             </ul>
                         </div>
                         <a id="tg-link-3m" href="#" target="_blank" class="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-extrabold text-center shadow-sm transition flex items-center justify-center gap-1.5">
@@ -802,7 +924,7 @@ $initial_sub = function_exists('get_user_subscription_info')
     </div>
 
     <!-- ==================================================== -->
-    <!-- ۷. سایر مودال‌ها (کپی روز، ساخت پوشه، انتقال جزوه، آپلود، صفحات ستاره‌دار و پیامک) -->
+    <!-- ۹. سایر مودال‌ها (کپی روز، ساخت پوشه، انتقال جزوه، آپلود، صفحات ستاره‌دار و تنظیم شماره موبایل بدون نام سرویس‌دهنده) -->
     <!-- ==================================================== -->
     <div id="copy-day-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs hidden items-center justify-center p-4 z-50">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
@@ -919,10 +1041,11 @@ $initial_sub = function_exists('get_user_subscription_info')
         </div>
     </div>
 
+    <!-- مودال تنظیم شماره موبایل (بدون ذکر هیچ نامی از شرکت یا سرویس‌دهنده پیامک) -->
     <div id="phone-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs hidden items-center justify-center p-4 z-50">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
             <div class="bg-slate-800 text-white px-4 py-3 flex items-center justify-between">
-                <h3 class="font-bold text-xs md:text-sm">📱 تنظیمات پیامک یادآوری (sms.ir)</h3>
+                <h3 class="font-bold text-xs md:text-sm">📱 تنظیمات شماره موبایل و یادآور پیامکی</h3>
                 <button type="button" onclick="closePhoneModal()" class="text-slate-400 hover:text-white text-xl leading-none">&times;</button>
             </div>
             <form onsubmit="handleUpdatePhone(event)" class="p-4 space-y-3.5 text-xs">
@@ -931,10 +1054,10 @@ $initial_sub = function_exists('get_user_subscription_info')
                     <button type="button" onclick="closePhoneModal(); openSubscriptionModal('برای فعال‌سازی ارسال خودکار پیامک یادآوری، اشتراک ویژه تهیه کنید.');" class="text-indigo-600 underline mr-1 font-extrabold">مشاهده پلن‌های اشتراک</button>
                 </div>
                 <p class="text-slate-600 leading-relaxed">
-                    اگر زمان پایان یک برنامه بگذرد و تیک انجام آن را نزده باشید، سیستم به صورت خودکار از طریق خط خدماتی <b>sms.ir</b> به شماره زیر پیامک یادآوری می‌فرستد:
+                    برای برنامه‌هایی که گزینه «ارسال پیامک یادآوری» را در آن‌ها فعال کرده باشید، در صورت گذشتن زمان پایان و تیک نخوردن برنامه، یک پیامک هشدار به شماره موبایل زیر ارسال می‌شود:
                 </p>
                 <div>
-                    <label class="block font-bold text-slate-700 mb-1">شماره موبایل شما *</label>
+                    <label class="block font-bold text-slate-700 mb-1">شماره موبایل دریافت‌کننده *</label>
                     <input type="tel" id="user-phone-input" required dir="ltr" pattern="09[0-9]{9}" maxlength="11" placeholder="09123456789" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-left font-bold">
                 </div>
                 <div class="flex justify-between items-center pt-2 border-t">
@@ -1002,7 +1125,7 @@ $initial_sub = function_exists('get_user_subscription_info')
         }
 
         // ====================================================
-        // متغیرهای پایه و وضعیت اشتراک کاربر
+        // متغیرهای پایه، وضعیت اشتراک و تنظیمات مقیاس تقویم
         // ====================================================
         const TODAY_GREGORIAN   = "<?php echo date('Y-m-d'); ?>";
         const KONKUR_GREGORIAN  = "<?php echo KONKUR_GREGORIAN_DATE; ?>";
@@ -1017,7 +1140,12 @@ $initial_sub = function_exists('get_user_subscription_info')
         let calendarFilter = 'all';
         let anchorDate = new Date(TODAY_GREGORIAN + 'T00:00:00');
         let loadedEvents = [];
+        let overdueEvents = [];
         let customCategories = [];
+        let calendarStats = {};
+
+        // ارتفاع هر ساعت در تقویم: 60px (استاندارد) یا 92px (نمای باز برای برنامه‌های ۱۵/۳۰ دقیقه‌ای)
+        let hourHeightPx = 60;
 
         const DEFAULT_CATEGORIES = [
             { id: 'def_1', name: 'تخصصی',  color: '#4f46e5', is_study: 1, isDefault: true },
@@ -1043,6 +1171,41 @@ $initial_sub = function_exists('get_user_subscription_info')
 
         const JALALI_MONTHS = ['فروردین','اردیبهشت','خرداد','تیر','مرداد','شهریور','مهر','آبان','آذر','دی','بهمن','اسفند'];
         const WEEKDAY_NAMES = ['شنبه','یکشنبه','دوشنبه','سه‌شنبه','چهارشنبه','پنج‌شنبه','جمعه'];
+
+        // توابع تبدیل دقیقه به پیکسل و برعکس (با پله‌های رند ۱۵ دقیقه‌ای)
+        function minsToPx(mins) {
+            return (mins / 60) * hourHeightPx;
+        }
+        function pxToSnappedMins(px, snapStep = 15) {
+            const rawMins = (px / hourHeightPx) * 60;
+            const snapped = Math.round(rawMins / snapStep) * snapStep;
+            return Math.max(0, Math.min(1440, snapped));
+        }
+        function minsToTimeStr(totalMins) {
+            const clamped = Math.max(0, Math.min(1439, Math.round(totalMins)));
+            const h = Math.floor(clamped / 60);
+            const m = clamped % 60;
+            return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+        }
+        function timeStrToMins(tStr) {
+            const parts = String(tStr || '00:00').split(':').map(Number);
+            return (parts[0] * 60) + (parts[1] || 0);
+        }
+
+        function toggleCalendarRowZoom() {
+            hourHeightPx = (hourHeightPx === 60) ? 92 : 60;
+            const btn = document.getElementById('btn-grid-zoom');
+            if (btn) {
+                btn.innerHTML = (hourHeightPx === 92)
+                    ? '🔍 <span class="hidden lg:inline">نمای فشرده</span>'
+                    : '🔍 <span class="hidden lg:inline">نمای باز</span>';
+                btn.className = (hourHeightPx === 92)
+                    ? 'bg-indigo-100 text-indigo-700 border border-indigo-200 px-2 py-1.5 rounded-lg text-xs font-extrabold transition'
+                    : 'bg-slate-100 hover:bg-slate-200 text-slate-700 px-2 py-1.5 rounded-lg text-xs font-bold transition';
+            }
+            initTimeLabels();
+            renderCalendar();
+        }
 
         // ====================================================
         // مدیریت رابط کاربری اشتراک ویژه، لینک هوشمند تلگرام و کد فعال‌سازی
@@ -1172,7 +1335,7 @@ $initial_sub = function_exists('get_user_subscription_info')
             if (!userSub.is_vip) {
                 e.preventDefault();
                 document.getElementById('ev-send-sms').checked = false;
-                openSubscriptionModal('قابلیت ارسال پیامک یادآوری خودکار (از طریق sms.ir) مخصوص کاربران دارای اشتراک ویژه است.');
+                openSubscriptionModal('قابلیت ارسال پیامک یادآوری خودکار مخصوص کاربران دارای اشتراک ویژه است.');
             }
         }
 
@@ -1229,9 +1392,12 @@ $initial_sub = function_exists('get_user_subscription_info')
 
         function initTimeLabels() {
             const col = document.getElementById('time-labels-col');
+            const gridEl = document.getElementById('calendar-grid-cols');
+            if (gridEl) gridEl.style.height = (24 * hourHeightPx) + 'px';
+
             let html = '';
             for (let h = 0; h < 24; h++) {
-                html += `<div class="hour-row border-b border-slate-100 flex items-start justify-center pt-1">${String(h).padStart(2, '0')}:00</div>`;
+                html += `<div style="height:${hourHeightPx}px" class="border-b border-slate-100 flex items-start justify-center pt-1">${String(h).padStart(2, '0')}:00</div>`;
             }
             col.innerHTML = html;
         }
@@ -1341,6 +1507,8 @@ $initial_sub = function_exists('get_user_subscription_info')
             const gridEl   = document.getElementById('calendar-grid-cols');
             const stripEl  = document.getElementById('mobile-week-strip');
 
+            gridEl.style.height = (24 * hourHeightPx) + 'px';
+
             document.getElementById('btn-view-week').className = viewMode === 'week'
                 ? 'px-2.5 py-1 rounded-md text-xs font-bold bg-white shadow-2xs text-indigo-600'
                 : 'px-2.5 py-1 rounded-md text-xs font-bold text-slate-600';
@@ -1398,7 +1566,10 @@ $initial_sub = function_exists('get_user_subscription_info')
 
                 if (data.status === 'success') {
                     loadedEvents = data.events || [];
+                    overdueEvents = data.overdue_events || [];
                     customCategories = data.custom_categories || [];
+                    calendarStats = data.stats || {};
+
                     if (data.subscription) {
                         userSub = data.subscription;
                         refreshSubscriptionUI();
@@ -1406,7 +1577,8 @@ $initial_sub = function_exists('get_user_subscription_info')
                     if (data.user_phone) {
                         document.getElementById('user-phone-input').value = data.user_phone;
                     }
-                    updateCalendarStatsBar(data.stats || {});
+                    updateCalendarStatsBar(calendarStats);
+                    updateOverdueButtonUI();
                 }
             } catch (err) {
                 console.error('Calendar fetch error:', err);
@@ -1426,9 +1598,7 @@ $initial_sub = function_exists('get_user_subscription_info')
                 let dayPlannedMins = 0;
                 let dayDoneMins = 0;
                 dayStudyEvents.forEach(e => {
-                    const [sh, sm] = e.start_time.split(':').map(Number);
-                    const [eh, em] = e.end_time.split(':').map(Number);
-                    const dur = Math.max(0, ((eh * 60) + em) - ((sh * 60) + sm));
+                    const dur = Math.max(0, timeStrToMins(e.end_time) - timeStrToMins(e.start_time));
                     dayPlannedMins += dur;
                     if (Number(e.is_completed) === 1) dayDoneMins += dur;
                 });
@@ -1464,14 +1634,11 @@ $initial_sub = function_exists('get_user_subscription_info')
 
                 let hoursCells = '';
                 for (let h = 0; h < 24; h++) {
-                    const startH = String(h).padStart(2, '0') + ':00';
-                    const endH   = String(Math.min(23, h + 1)).padStart(2, '0') + (h === 23 ? ':59' : ':00');
-                    const clickAttr = isLocked ? '' : `onclick="openEventModal('${gStr}', '${startH}', '${endH}')"`;
-                    hoursCells += `<div ${clickAttr} class="hour-row border-b border-slate-100 ${isLocked ? '' : 'hover:bg-indigo-50/40 cursor-pointer'}"></div>`;
+                    hoursCells += `<div style="height:${hourHeightPx}px" class="border-b border-slate-100 ${isLocked ? '' : 'hover:bg-indigo-50/30'}"></div>`;
                 }
 
                 gridHtml += `
-                    <div class="flex-1 border-l border-slate-200 relative ${isLocked ? 'locked-day-pattern' : ''}" data-gdate="${gStr}">
+                    <div class="day-column flex-1 border-l border-slate-200 relative ${isLocked ? 'locked-day-pattern' : 'cursor-crosshair'}" data-gdate="${gStr}" data-locked="${isLocked ? '1' : '0'}">
                         ${hoursCells}
                         <div class="events-layer absolute inset-0 pointer-events-none"></div>
                     </div>
@@ -1487,10 +1654,8 @@ $initial_sub = function_exists('get_user_subscription_info')
 
         function computeSideBySideLayout(dayEvents) {
             const items = dayEvents.map(ev => {
-                const [sh, sm] = ev.start_time.split(':').map(Number);
-                const [eh, em] = ev.end_time.split(':').map(Number);
-                const startMins = (sh * 60) + sm;
-                const endMins   = Math.max(startMins + 25, (eh * 60) + em);
+                const startMins = timeStrToMins(ev.start_time);
+                const endMins   = Math.max(startMins + 20, timeStrToMins(ev.end_time));
                 return { ev, startMins, endMins, colIdx: 0, totalCols: 1 };
             });
 
@@ -1562,29 +1727,30 @@ $initial_sub = function_exists('get_user_subscription_info')
                 const positionedItems = computeSideBySideLayout(byDate[gDate]);
 
                 positionedItems.forEach(({ ev, startMins, endMins, colIdx, totalCols }) => {
-                    const duration = Math.max(26, endMins - startMins);
-                    const widthPct = 100 / totalCols;
-                    const rightPct = colIdx * widthPct;
+                    const topPx      = minsToPx(startMins);
+                    const heightPx   = Math.max(24, minsToPx(endMins - startMins));
+                    const widthPct   = 100 / totalCols;
+                    const rightPct   = colIdx * widthPct;
+                    const isDone     = Number(ev.is_completed) === 1;
 
                     const card = document.createElement('div');
-                    card.className = 'cal-event-card pointer-events-auto absolute rounded-lg p-1.5 text-white shadow-md cursor-pointer overflow-hidden transition flex flex-col justify-between border border-white/25';
-                    card.style.top    = `${startMins}px`;
-                    card.style.height = `${duration}px`;
+                    card.className = 'cal-event-card pointer-events-auto absolute rounded-lg p-1.5 pb-2.5 text-white shadow-md cursor-grab overflow-hidden flex flex-col justify-between border border-white/25';
+                    card.dataset.eventId   = String(ev.id);
+                    card.dataset.gdate     = ev.g_date;
+                    card.dataset.startMins = String(startMins);
+                    card.dataset.endMins   = String(endMins);
+
+                    card.style.top    = `${topPx}px`;
+                    card.style.height = `${heightPx}px`;
                     card.style.right  = `calc(${rightPct}% + 2px)`;
                     card.style.width  = `calc(${widthPct}% - 4px)`;
                     card.style.zIndex = String(10 + colIdx);
                     card.style.backgroundColor = ev.color || '#4f46e5';
 
-                    if (Number(ev.is_completed) === 1) {
+                    if (isDone) {
                         card.style.opacity = '0.68';
                     }
 
-                    card.onclick = (e) => {
-                        e.stopPropagation();
-                        openEventModalForEdit(ev);
-                    };
-
-                    const checkBadge = Number(ev.is_completed) === 1 ? '✅ ' : '';
                     const catLabel = ev.category_label ? `<span class="opacity-85 text-[9px]">[${escapeHtml(ev.category_label)}]</span> ` : '';
 
                     let badgesHtml = '<div class="flex flex-wrap gap-1 mt-0.5">';
@@ -1598,18 +1764,567 @@ $initial_sub = function_exists('get_user_subscription_info')
 
                     card.innerHTML = `
                         <div class="min-w-0">
-                            <div class="text-[10px] md:text-[11px] font-extrabold leading-tight truncate ${Number(ev.is_completed) === 1 ? 'line-through' : ''}" title="${escapeHtml(ev.title)}">
-                                ${checkBadge}${catLabel}${escapeHtml(ev.title)}
+                            <div class="flex items-start justify-between gap-1">
+                                <div class="text-[10px] md:text-[11px] font-extrabold leading-tight truncate ${isDone ? 'line-through' : ''}" title="${escapeHtml(ev.title)}">
+                                    ${catLabel}${escapeHtml(ev.title)}
+                                </div>
+                                <button type="button" onclick="quickToggleEventComplete(event, ${ev.id})" class="quick-check-btn w-4 h-4 rounded-full border border-white/80 flex items-center justify-center text-[9px] shrink-0 ${isDone ? 'bg-emerald-500 text-white' : 'bg-black/20 hover:bg-white/30 text-transparent'}" title="تیک زدن سریع انجام کار">
+                                    ✓
+                                </button>
                             </div>
-                            <div class="text-[9px] opacity-90">${ev.start_time.slice(0,5)} - ${ev.end_time.slice(0,5)}</div>
+                            <div class="card-time-label text-[9px] opacity-95 font-mono mt-0.5" dir="ltr">${ev.start_time.slice(0,5)} - ${ev.end_time.slice(0,5)}</div>
                         </div>
                         ${badgesHtml}
+                        <div class="cal-resize-handle" title="برای تغییر ساعت پایان، به بالا یا پایین بکشید"></div>
                     `;
+
                     dayCol.appendChild(card);
                 });
             });
         }
 
+        // تیک زدن تک‌کلیکی انجام کار مستقیم روی کارت تقویم
+        async function quickToggleEventComplete(e, eventId) {
+            e.stopPropagation();
+            e.preventDefault();
+            const fd = new FormData();
+            fd.append('action', 'toggle_complete');
+            fd.append('id', eventId);
+            await fetch('api_calendar.php', { method: 'POST', body: fd });
+            renderCalendar();
+        }
+
+        // ====================================================
+        // موتور تعاملی تقویم: ۱. Drag & Drop تسک‌ها ۲. Resize لبه پایینی ۳. Drag-to-Create روی فضای خالی
+        // ====================================================
+        (function initInteractiveCalendarGrid() {
+            const scrollArea = document.getElementById('calendar-scroll-area');
+            const gridCols   = document.getElementById('calendar-grid-cols');
+            const statusPill = document.getElementById('live-drag-status-pill');
+
+            let interactionMode = null; // 'move' | 'resize' | 'create'
+            let activeCardEl    = null;
+            let activeEventObj  = null;
+            let ghostCreateEl   = null;
+
+            let startClientX = 0;
+            let startClientY = 0;
+            let initialStartMins = 0;
+            let initialEndMins   = 0;
+            let durationMins     = 60;
+            let currentTargetGDate = '';
+            let currentNewStartMins = 0;
+            let currentNewEndMins   = 0;
+
+            let hasMovedEnough = false;
+            let touchHoldTimer = null;
+            let autoScrollInterval = null;
+
+            function getPointCoords(e) {
+                if (e.touches && e.touches.length > 0) {
+                    return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+                }
+                if (e.changedTouches && e.changedTouches.length > 0) {
+                    return { x: e.changedTouches[0].clientX, y: e.changedTouches[0].clientY };
+                }
+                return { x: e.clientX, y: e.clientY };
+            }
+
+            function findDayColumnAtX(clientX) {
+                const cols = Array.from(gridCols.querySelectorAll('.day-column'));
+                for (const col of cols) {
+                    const r = col.getBoundingClientRect();
+                    if (clientX >= r.left && clientX <= r.right) {
+                        return col;
+                    }
+                }
+                return null;
+            }
+
+            function getMinutesAtClientY(clientY) {
+                const gridRect = gridCols.getBoundingClientRect();
+                const relY     = clientY - gridRect.top;
+                return pxToSnappedMins(relY, 15);
+            }
+
+            function showDragStatus(text) {
+                if (!statusPill) return;
+                statusPill.textContent = text;
+                statusPill.classList.remove('hidden');
+            }
+
+            function hideDragStatus() {
+                if (!statusPill) return;
+                statusPill.classList.add('hidden');
+            }
+
+            // اسکرول خودکار صفحه وقتی کاربر کارت را به لبه بالا یا پایین تقویم نزدیک می‌کند
+            function handleAutoEdgeScroll(clientY) {
+                const rect = scrollArea.getBoundingClientRect();
+                const edgeZone = 48;
+                if (autoScrollInterval) {
+                    clearInterval(autoScrollInterval);
+                    autoScrollInterval = null;
+                }
+                if (clientY < rect.top + edgeZone) {
+                    autoScrollInterval = setInterval(() => { scrollArea.scrollTop -= 12; }, 25);
+                } else if (clientY > rect.bottom - edgeZone) {
+                    autoScrollInterval = setInterval(() => { scrollArea.scrollTop += 12; }, 25);
+                }
+            }
+
+            function stopAutoEdgeScroll() {
+                if (autoScrollInterval) {
+                    clearInterval(autoScrollInterval);
+                    autoScrollInterval = null;
+                }
+            }
+
+            function beginCardMoveOrResize(mode, cardEl, pt) {
+                const evId = Number(cardEl.dataset.eventId);
+                activeEventObj = loadedEvents.find(x => Number(x.id) === evId);
+                if (!activeEventObj) return;
+
+                interactionMode     = mode;
+                activeCardEl        = cardEl;
+                startClientX        = pt.x;
+                startClientY        = pt.y;
+                initialStartMins    = Number(cardEl.dataset.startMins);
+                initialEndMins      = Number(cardEl.dataset.endMins);
+                durationMins        = Math.max(15, initialEndMins - initialStartMins);
+                currentTargetGDate  = cardEl.dataset.gdate;
+                currentNewStartMins = initialStartMins;
+                currentNewEndMins   = initialEndMins;
+                hasMovedEnough      = false;
+
+                cardEl.classList.add('dragging-active');
+                showDragStatus(mode === 'resize'
+                    ? `↕️ تغییر ساعت پایان: ${minsToTimeStr(currentNewStartMins)} - ${minsToTimeStr(currentNewEndMins)}`
+                    : `✋ جابه‌جایی: ${minsToTimeStr(currentNewStartMins)} - ${minsToTimeStr(currentNewEndMins)}`
+                );
+            }
+
+            function beginCreateSelection(dayCol, pt) {
+                if (dayCol.dataset.locked === '1') return;
+                interactionMode     = 'create';
+                currentTargetGDate  = dayCol.dataset.gdate;
+                startClientX        = pt.x;
+                startClientY        = pt.y;
+                initialStartMins    = Math.min(1410, getMinutesAtClientY(pt.y));
+                currentNewStartMins = initialStartMins;
+                currentNewEndMins   = Math.min(1440, initialStartMins + 60);
+                hasMovedEnough      = false;
+
+                if (ghostCreateEl) ghostCreateEl.remove();
+                ghostCreateEl = document.createElement('div');
+                ghostCreateEl.className = 'drag-create-ghost';
+                dayCol.appendChild(ghostCreateEl);
+                updateGhostCreateBox();
+            }
+
+            function updateGhostCreateBox() {
+                if (!ghostCreateEl) return;
+                const sM = Math.min(currentNewStartMins, currentNewEndMins);
+                const eM = Math.max(sM + 15, Math.max(currentNewStartMins, currentNewEndMins));
+                const durH = +((eM - sM) / 60).toFixed(2);
+
+                ghostCreateEl.style.top    = `${minsToPx(sM)}px`;
+                ghostCreateEl.style.height = `${Math.max(22, minsToPx(eM - sM))}px`;
+                ghostCreateEl.innerHTML    = `<span>🕒 ${minsToTimeStr(sM)} تا ${minsToTimeStr(eM)} (${durH} ساعت)</span>`;
+                showDragStatus(`➕ انتخاب بازه جدید: ${minsToTimeStr(sM)} تا ${minsToTimeStr(eM)}`);
+            }
+
+            function onPointerMove(e) {
+                const pt = getPointCoords(e);
+
+                // اگر هنوز تایمر لمس طولانی موبایل فعال است و کاربر انگشتش را برای اسکرول تکان داد، تایمر لغو شود تا صفحه راحت اسکرول شود
+                if (touchHoldTimer && Math.hypot(pt.x - startClientX, pt.y - startClientY) > 10) {
+                    clearTimeout(touchHoldTimer);
+                    touchHoldTimer = null;
+                }
+
+                if (!interactionMode) return;
+                if (e.cancelable) e.preventDefault();
+
+                if (Math.hypot(pt.x - startClientX, pt.y - startClientY) > 5) {
+                    hasMovedEnough = true;
+                }
+
+                handleAutoEdgeScroll(pt.y);
+
+                if (interactionMode === 'move' && activeCardEl) {
+                    const deltaPx   = pt.y - startClientY;
+                    const deltaMins = Math.round(((deltaPx / hourHeightPx) * 60) / 15) * 15;
+
+                    let nextStart = Math.max(0, Math.min(1440 - durationMins, initialStartMins + deltaMins));
+                    let nextEnd   = nextStart + durationMins;
+
+                    currentNewStartMins = nextStart;
+                    currentNewEndMins   = nextEnd;
+
+                    activeCardEl.style.top = `${minsToPx(nextStart)}px`;
+                    const timeLbl = activeCardEl.querySelector('.card-time-label');
+                    if (timeLbl) {
+                        timeLbl.textContent = `${minsToTimeStr(nextStart)} - ${minsToTimeStr(nextEnd)}`;
+                    }
+
+                    // بررسی انتقال کارت به ستون روز دیگر در نمای هفتگی
+                    const targetCol = findDayColumnAtX(pt.x);
+                    if (targetCol && targetCol.dataset.locked !== '1') {
+                        const newGDate = targetCol.dataset.gdate;
+                        if (newGDate && newGDate !== currentTargetGDate) {
+                            currentTargetGDate = newGDate;
+                            const layer = targetCol.querySelector('.events-layer');
+                            if (layer && activeCardEl.parentElement !== layer) {
+                                layer.appendChild(activeCardEl);
+                            }
+                        }
+                    }
+
+                    showDragStatus(`✋ انتقال به: ${minsToTimeStr(nextStart)} تا ${minsToTimeStr(nextEnd)}`);
+                } else if (interactionMode === 'resize' && activeCardEl) {
+                    const curMins = getMinutesAtClientY(pt.y);
+                    const nextEnd = Math.max(initialStartMins + 15, Math.min(1440, curMins));
+                    currentNewEndMins = nextEnd;
+
+                    activeCardEl.style.height = `${Math.max(22, minsToPx(nextEnd - initialStartMins))}px`;
+                    const timeLbl = activeCardEl.querySelector('.card-time-label');
+                    if (timeLbl) {
+                        timeLbl.textContent = `${minsToTimeStr(initialStartMins)} - ${minsToTimeStr(nextEnd)}`;
+                    }
+                    showDragStatus(`↕️ ساعت پایان جدید: ${minsToTimeStr(initialStartMins)} تا ${minsToTimeStr(nextEnd)}`);
+                } else if (interactionMode === 'create') {
+                    const curMins = getMinutesAtClientY(pt.y);
+                    if (Math.abs(curMins - initialStartMins) >= 15) {
+                        currentNewEndMins = curMins;
+                    } else {
+                        currentNewEndMins = Math.min(1440, initialStartMins + 60);
+                    }
+                    updateGhostCreateBox();
+                }
+            }
+
+            async function onPointerUp() {
+                if (touchHoldTimer) {
+                    clearTimeout(touchHoldTimer);
+                    touchHoldTimer = null;
+                }
+                stopAutoEdgeScroll();
+                hideDragStatus();
+
+                if (!interactionMode) return;
+
+                const finishedMode = interactionMode;
+                interactionMode = null;
+
+                if (finishedMode === 'move' || finishedMode === 'resize') {
+                    if (activeCardEl) activeCardEl.classList.remove('dragging-active');
+
+                    // اگر کاربر در دسکتاپ فقط روی کارت کلیک کرده و آن را نکشیده است، پنجره ویرایش باز شود
+                    if (!hasMovedEnough && activeEventObj) {
+                        const evToEdit = activeEventObj;
+                        activeCardEl = null;
+                        activeEventObj = null;
+                        openEventModalForEdit(evToEdit);
+                        return;
+                    }
+
+                    if (activeEventObj) {
+                        const fd = new FormData();
+                        fd.append('action', 'move_resize');
+                        fd.append('id', activeEventObj.id);
+                        fd.append('g_date', currentTargetGDate);
+                        fd.append('start_time', minsToTimeStr(currentNewStartMins));
+                        fd.append('end_time', minsToTimeStr(currentNewEndMins === 1440 ? 1439 : currentNewEndMins));
+
+                        activeCardEl = null;
+                        activeEventObj = null;
+                        await fetch('api_calendar.php', { method: 'POST', body: fd });
+                        renderCalendar();
+                    }
+                } else if (finishedMode === 'create') {
+                    if (ghostCreateEl) {
+                        ghostCreateEl.remove();
+                        ghostCreateEl = null;
+                    }
+                    const sM = Math.min(currentNewStartMins, currentNewEndMins);
+                    let eM   = Math.max(currentNewStartMins, currentNewEndMins);
+                    if (!hasMovedEnough || eM - sM < 15) {
+                        eM = Math.min(1439, sM + 60);
+                    } else if (eM >= 1440) {
+                        eM = 1439;
+                    }
+                    openEventModal(currentTargetGDate, minsToTimeStr(sM), minsToTimeStr(eM));
+                }
+            }
+
+            // ۱. رویدادهای موس (دسکتاپ)
+            gridCols.addEventListener('mousedown', (e) => {
+                if (e.button !== 0) return;
+                if (e.target.closest('.quick-check-btn')) return;
+
+                const pt = getPointCoords(e);
+                const resizeHandle = e.target.closest('.cal-resize-handle');
+                const cardEl       = e.target.closest('.cal-event-card');
+
+                if (resizeHandle && cardEl) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    beginCardMoveOrResize('resize', cardEl, pt);
+                } else if (cardEl) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    beginCardMoveOrResize('move', cardEl, pt);
+                } else {
+                    const dayCol = e.target.closest('.day-column');
+                    if (dayCol && dayCol.dataset.locked !== '1') {
+                        e.preventDefault();
+                        beginCreateSelection(dayCol, pt);
+                    }
+                }
+            });
+
+            window.addEventListener('mousemove', onPointerMove, { passive: false });
+            window.addEventListener('mouseup', onPointerUp);
+
+            // ۲. رویدادهای لمسی (موبایل و تبلت)
+            gridCols.addEventListener('touchstart', (e) => {
+                if (e.touches.length !== 1) return;
+                if (e.target.closest('.quick-check-btn')) return;
+
+                const pt = getPointCoords(e);
+                startClientX = pt.x;
+                startClientY = pt.y;
+
+                const resizeHandle = e.target.closest('.cal-resize-handle');
+                const cardEl       = e.target.closest('.cal-event-card');
+                const dayCol       = e.target.closest('.day-column');
+
+                if (resizeHandle && cardEl) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (navigator.vibrate) navigator.vibrate(20);
+                    beginCardMoveOrResize('resize', cardEl, pt);
+                } else if (cardEl) {
+                    // نگه‌داشتن کوتاه انگشت (190ms) روی کارت در موبایل برای شروع جابه‌جایی (Drag)
+                    touchHoldTimer = setTimeout(() => {
+                        touchHoldTimer = null;
+                        if (navigator.vibrate) navigator.vibrate(25);
+                        beginCardMoveOrResize('move', cardEl, pt);
+                    }, 190);
+                } else if (dayCol && dayCol.dataset.locked !== '1') {
+                    // نگه‌داشتن کوتاه انگشت روی فضای خالی در موبایل برای کشیدن بازه زمانی دلخواه
+                    touchHoldTimer = setTimeout(() => {
+                        touchHoldTimer = null;
+                        if (navigator.vibrate) navigator.vibrate(25);
+                        beginCreateSelection(dayCol, pt);
+                    }, 210);
+                }
+            }, { passive: false });
+
+            window.addEventListener('touchmove', onPointerMove, { passive: false });
+
+            gridCols.addEventListener('touchend', (e) => {
+                // اگر کاربر در موبایل بدون نگه‌داشتن طولانی، یک ضربه سریع (Tap) روی کارت یا ردیف خالی زد
+                if (touchHoldTimer) {
+                    clearTimeout(touchHoldTimer);
+                    touchHoldTimer = null;
+                    const pt = getPointCoords(e);
+                    if (Math.hypot(pt.x - startClientX, pt.y - startClientY) < 10) {
+                        const cardEl = e.target.closest('.cal-event-card');
+                        if (cardEl) {
+                            const evId = Number(cardEl.dataset.eventId);
+                            const evObj = loadedEvents.find(x => Number(x.id) === evId);
+                            if (evObj) openEventModalForEdit(evObj);
+                        } else {
+                            const dayCol = e.target.closest('.day-column');
+                            if (dayCol && dayCol.dataset.locked !== '1') {
+                                const sM = Math.min(1380, getMinutesAtClientY(pt.y));
+                                openEventModal(dayCol.dataset.gdate, minsToTimeStr(sM), minsToTimeStr(sM + 60));
+                            }
+                        }
+                    }
+                    return;
+                }
+                onPointerUp();
+            });
+        })();
+
+        // ====================================================
+        // مودال کارنامه تحلیلی هفته و مودال برنامه‌های عقب‌افتاده
+        // ====================================================
+        function updateOverdueButtonUI() {
+            const btn   = document.getElementById('btn-overdue-backlog');
+            const badge = document.getElementById('overdue-count-badge');
+            if (!btn || !badge) return;
+
+            if (overdueEvents.length > 0) {
+                badge.textContent = overdueEvents.length;
+                btn.classList.remove('hidden');
+                btn.classList.add('flex');
+            } else {
+                btn.classList.add('hidden');
+                btn.classList.remove('flex');
+            }
+        }
+
+        function openOverdueModal() {
+            const container = document.getElementById('overdue-list-container');
+            if (overdueEvents.length === 0) {
+                container.innerHTML = `<div class="text-center text-slate-400 py-8">🎉 هیچ برنامه درسی عقب‌افتاده‌ای ندارید!</div>`;
+            } else {
+                container.innerHTML = overdueEvents.map(ev => `
+                    <div class="p-3 bg-slate-50 border border-slate-200 rounded-xl flex flex-col gap-2">
+                        <div class="flex items-start justify-between gap-2">
+                            <div class="min-w-0">
+                                <span class="inline-block w-2.5 h-2.5 rounded-full ml-1" style="background:${ev.color}"></span>
+                                <span class="font-extrabold text-slate-800">${escapeHtml(ev.title)}</span>
+                                <div class="text-[10px] text-slate-500 mt-0.5">📅 تاریخ: ${ev.j_date} | 🕒 ساعت ${ev.start_time.slice(0,5)} تا ${ev.end_time.slice(0,5)}</div>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-3 gap-1.5 pt-1 border-t border-slate-200/70">
+                            <button type="button" onclick="quickCompleteOverdueItem(${ev.id})" class="py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold text-[10px]">
+                                ✅ انجام شد
+                            </button>
+                            <button type="button" onclick="moveOverdueItemToDate(${ev.id}, '${TODAY_GREGORIAN}')" class="py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg font-bold text-[10px]">
+                                📅 انتقال به امروز
+                            </button>
+                            <button type="button" onclick="moveOverdueItemToTomorrow(${ev.id})" class="py-1.5 bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 rounded-lg font-bold text-[10px]">
+                                ⏭️ انتقال به فردا
+                            </button>
+                        </div>
+                    </div>
+                `).join('');
+            }
+            const m = document.getElementById('overdue-modal');
+            m.classList.remove('hidden');
+            m.classList.add('flex');
+        }
+
+        function closeOverdueModal() {
+            const m = document.getElementById('overdue-modal');
+            m.classList.add('hidden');
+            m.classList.remove('flex');
+        }
+
+        async function quickCompleteOverdueItem(id) {
+            const fd = new FormData();
+            fd.append('action', 'toggle_complete');
+            fd.append('id', id);
+            await fetch('api_calendar.php', { method: 'POST', body: fd });
+            await renderCalendar();
+            openOverdueModal();
+        }
+
+        async function moveOverdueItemToDate(id, targetGDate) {
+            const fd = new FormData();
+            fd.append('action', 'move_to_date');
+            fd.append('id', id);
+            fd.append('target_date', targetGDate);
+            await fetch('api_calendar.php', { method: 'POST', body: fd });
+            await renderCalendar();
+            openOverdueModal();
+        }
+
+        async function moveOverdueItemToTomorrow(id) {
+            const tomorrow = new Date(TODAY_GREGORIAN + 'T00:00:00');
+            tomorrow.setDate(tomorrow.getDate() + 1);
+            await moveOverdueItemToDate(id, formatGDate(tomorrow));
+        }
+
+        function openAnalyticsModal() {
+            const fullWeek = getFullWeekDays(anchorDate);
+            const plannedH = calendarStats.planned_hours || 0;
+            const doneH    = calendarStats.completed_hours || 0;
+            const effPct   = plannedH > 0 ? Math.round((doneH / plannedH) * 100) : 0;
+
+            document.getElementById('an-total-planned').textContent = `${plannedH} ساعت`;
+            document.getElementById('an-total-done').textContent    = `${doneH} ساعت`;
+            document.getElementById('an-efficiency').textContent    = `${effPct}%`;
+
+            // ۱. رسم نمودار میله‌ای ۷ روز هفته
+            let maxDayH = 1;
+            const dayMetrics = fullWeek.map(wd => {
+                const gStr = formatGDate(wd);
+                const jInf = getJalaliInfo(wd);
+                const evs  = loadedEvents.filter(e => e.g_date === gStr && isEventStudyType(e));
+                let pMins = 0, dMins = 0;
+                evs.forEach(e => {
+                    const dur = Math.max(0, timeStrToMins(e.end_time) - timeStrToMins(e.start_time));
+                    pMins += dur;
+                    if (Number(e.is_completed) === 1) dMins += dur;
+                });
+                const pH = +(pMins / 60).toFixed(1);
+                const dH = +(dMins / 60).toFixed(1);
+                if (pH > maxDayH) maxDayH = pH;
+                return { dayName: jInf.dayName, jd: jInf.jd, pH, dH };
+            });
+
+            document.getElementById('an-daily-bars').innerHTML = dayMetrics.map(dm => {
+                const pHeightPct = Math.round((dm.pH / maxDayH) * 100);
+                const dHeightPct = Math.round((dm.dH / maxDayH) * 100);
+                return `
+                    <div class="flex flex-col items-center h-full justify-end">
+                        <div class="text-[9px] font-bold text-emerald-700 mb-1">${dm.dH}س</div>
+                        <div class="w-full max-w-[26px] bg-slate-200 rounded-t-lg relative overflow-hidden flex items-end" style="height:${Math.max(8, pHeightPct)}%">
+                            <div class="w-full bg-emerald-500 rounded-t-lg transition-all" style="height:${dm.pH > 0 ? Math.round((dm.dH / dm.pH) * 100) : 0}%"></div>
+                        </div>
+                        <div class="text-[10px] font-extrabold text-slate-700 mt-1 truncate">${dm.dayName.slice(0,3)}</div>
+                    </div>
+                `;
+            }).join('');
+
+            // ۲. تفکیک ساعات بر اساس نوع / دسته‌بندی
+            const catMap = {};
+            loadedEvents.forEach(ev => {
+                const label = ev.category_label || 'تخصصی';
+                const color = ev.color || '#4f46e5';
+                const dur   = Math.max(0, timeStrToMins(ev.end_time) - timeStrToMins(ev.start_time));
+                if (!catMap[label]) catMap[label] = { label, color, plannedMins: 0, doneMins: 0 };
+                catMap[label].plannedMins += dur;
+                if (Number(ev.is_completed) === 1) catMap[label].doneMins += dur;
+            });
+
+            const catArr = Object.values(catMap).sort((a, b) => b.plannedMins - a.plannedMins);
+            const catContainer = document.getElementById('an-category-breakdown');
+            if (catArr.length === 0) {
+                catContainer.innerHTML = `<div class="text-center text-slate-400 py-4">در این هفته هنوز برنامه‌ای ثبت نشده است.</div>`;
+            } else {
+                catContainer.innerHTML = catArr.map(c => {
+                    const pH  = +(c.plannedMins / 60).toFixed(1);
+                    const dH  = +(c.doneMins / 60).toFixed(1);
+                    const pct = c.plannedMins > 0 ? Math.round((c.doneMins / c.plannedMins) * 100) : 0;
+                    return `
+                        <div class="bg-white p-2.5 rounded-xl border border-slate-200 space-y-1">
+                            <div class="flex items-center justify-between text-[11px] font-bold">
+                                <div class="flex items-center gap-1.5">
+                                    <span class="w-3 h-3 rounded-full" style="background:${c.color}"></span>
+                                    <span>${escapeHtml(c.label)}</span>
+                                </div>
+                                <span class="text-slate-600">انجام‌شده: <b class="text-emerald-600">${dH} ساعت</b> از ${pH} ساعت (${pct}%)</span>
+                            </div>
+                            <div class="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                <div class="h-full rounded-full" style="width:${pct}%; background:${c.color}"></div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            }
+
+            const m = document.getElementById('analytics-modal');
+            m.classList.remove('hidden');
+            m.classList.add('flex');
+        }
+
+        function closeAnalyticsModal() {
+            const m = document.getElementById('analytics-modal');
+            m.classList.add('hidden');
+            m.classList.remove('flex');
+        }
+
+        // ====================================================
+        // سایر کنترل‌های تقویم
+        // ====================================================
         function setCalendarFilter(filter) {
             calendarFilter = filter;
             ['all', 'study', 'misc'].forEach(f => {
@@ -1632,7 +2347,7 @@ $initial_sub = function_exists('get_user_subscription_info')
             const mins = (now.getHours() * 60) + now.getMinutes();
             const line = document.createElement('div');
             line.className = 'absolute right-0 left-0 border-t-2 border-rose-500 z-20 pointer-events-none flex items-center';
-            line.style.top = `${mins}px`;
+            line.style.top = `${minsToPx(mins)}px`;
             line.innerHTML = `<span class="w-2.5 h-2.5 rounded-full bg-rose-500 -mr-1.5"></span>`;
             todayCol.appendChild(line);
         }
@@ -1711,17 +2426,13 @@ $initial_sub = function_exists('get_user_subscription_info')
                 return;
             }
 
-            const [sh, sm] = start.split(':').map(Number);
-            const [eh, em] = end.split(':').map(Number);
-            const sMins = (sh * 60) + sm;
-            const eMins = (eh * 60) + em;
+            const sMins = timeStrToMins(start);
+            const eMins = timeStrToMins(end);
 
             const conflicts = loadedEvents.filter(ev => {
                 if (ev.g_date !== gDate || Number(ev.id) === curId) return false;
-                const [esh, esm] = ev.start_time.split(':').map(Number);
-                const [eeh, eem] = ev.end_time.split(':').map(Number);
-                const evS = (esh * 60) + esm;
-                const evE = (eeh * 60) + eem;
+                const evS = timeStrToMins(ev.start_time);
+                const evE = timeStrToMins(ev.end_time);
                 return (sMins < evE && eMins > evS);
             });
 
@@ -1752,7 +2463,8 @@ $initial_sub = function_exists('get_user_subscription_info')
             document.getElementById('ev-start').value = startTime;
             document.getElementById('ev-end').value = endTime;
 
-            document.getElementById('ev-send-sms').checked = !!userSub.is_vip;
+            // تیک ارسال پیامک یادآوری به صورت پیش‌فرض برای همه غیرفعال (خاموش) است
+            document.getElementById('ev-send-sms').checked = false;
             refreshSubscriptionUI();
 
             renderCategoryOptionsInModal('#4f46e5');
@@ -1776,7 +2488,7 @@ $initial_sub = function_exists('get_user_subscription_info')
             document.getElementById('ev-desc').value = ev.description || '';
             document.getElementById('ev-pdf-id').value = ev.pdf_id || '';
             document.getElementById('ev-pdf-page').value = ev.pdf_page || 1;
-            document.getElementById('ev-send-sms').checked = userSub.is_vip && (Number(ev.send_sms ?? 1) === 1);
+            document.getElementById('ev-send-sms').checked = userSub.is_vip && (Number(ev.send_sms ?? 0) === 1);
             refreshSubscriptionUI();
 
             document.getElementById('ev-test-correct').value = (ev.test_correct !== null && ev.test_correct !== undefined) ? ev.test_correct : '';
@@ -1830,6 +2542,23 @@ $initial_sub = function_exists('get_user_subscription_info')
                 renderCalendar();
             } else {
                 alert(data.message || 'خطا در ذخیره برنامه');
+            }
+        }
+
+        async function duplicateCurrentEvent() {
+            const id = document.getElementById('ev-id').value;
+            if (!id) return;
+            const fd = new FormData();
+            fd.append('action', 'duplicate');
+            fd.append('id', id);
+
+            const res = await fetch('api_calendar.php', { method: 'POST', body: fd });
+            const data = await res.json();
+            if (data.status === 'success') {
+                closeEventModal();
+                renderCalendar();
+            } else {
+                alert(data.message || 'خطا در کپی کردن برنامه');
             }
         }
 
@@ -2296,9 +3025,6 @@ $initial_sub = function_exists('get_user_subscription_info')
             }
         }
 
-        // ====================================================
-        // بارگذاری باینری و بدون خطای PDF
-        // ====================================================
         async function loadAndOpenPdf(pdfId, targetPage = null) {
             if (pdfList.length === 0) await fetchUserPdfs();
             const targetItem = pdfList.find(p => Number(p.id) === Number(pdfId));
@@ -2534,7 +3260,7 @@ $initial_sub = function_exists('get_user_subscription_info')
         }
 
         // ====================================================
-        // ژست لمسی زوم دو انگشتی قفل‌شده روی نقطه بین دو انگشت + وسط‌چین هوشمند
+        // ژست لمسی زوم دو انگشتی قفل‌شده روی نقطه بین دو انگشت + وسط‌چین هوشمند در جزوه‌خوان
         // ====================================================
         let isPinchingPdf = false;
         (function initPdfTouchGestures() {
@@ -2544,10 +3270,8 @@ $initial_sub = function_exists('get_user_subscription_info')
             let startDist  = 0;
             let startScale = 1.0;
             let liveScale  = 1.0;
-            // مختصات نسبی نقطه بین دو انگشت روی خود برگه PDF (از 0.0 تا 1.0)
             let pinchRelX  = 0.5;
             let pinchRelY  = 0.5;
-            // مکان انگشتان نسبت به کادر دید گوشی
             let pinchVpX   = 0;
             let pinchVpY   = 0;
             let reRenderTimer = null;
@@ -2585,14 +3309,12 @@ $initial_sub = function_exists('get_user_subscription_info')
                     pinchVpX = midClientX - vpRect.left;
                     pinchVpY = midClientY - vpRect.top;
 
-                    // پیدا کردن نقطه دقیق روی برگه جزوه که زیر دو انگشت قرار دارد
                     pinchRelX = Math.min(1, Math.max(0, (midClientX - wrapRect.left) / Math.max(1, wrapRect.width)));
                     pinchRelY = Math.min(1, Math.max(0, (midClientY - wrapRect.top) / Math.max(1, wrapRect.height)));
                 } else if (e.touches.length === 1 && !isPinchingPdf && currentTool === 'pan') {
                     touchSwipeStartX = e.touches[0].clientX;
                     touchSwipeStartY = e.touches[0].clientY;
 
-                    // زوم سریع با دو بار ضربه انگشت (Double-Tap) دقیقاً روی نقطه ضربه‌زده‌شده
                     const now = Date.now();
                     if (now - lastTapTime < 280 && Math.hypot(touchSwipeStartX - lastTapX, touchSwipeStartY - lastTapY) < 28) {
                         e.preventDefault();
@@ -2647,7 +3369,6 @@ $initial_sub = function_exists('get_user_subscription_info')
                 wrapperEl.style.width  = newW + 'px';
                 wrapperEl.style.height = newH + 'px';
 
-                // نگه داشتن نقطه دقیق جزوه در زیر انگشتان در حین باز و بسته کردن دست
                 pdfViewportEl.scrollLeft = Math.max(0, wrapperEl.offsetLeft + (pinchRelX * newW) - pinchVpX);
                 pdfViewportEl.scrollTop  = Math.max(0, wrapperEl.offsetTop + (pinchRelY * newH) - pinchVpY);
             }, { passive: false });
@@ -2729,9 +3450,6 @@ $initial_sub = function_exists('get_user_subscription_info')
             }
         }
 
-        // ====================================================
-        // حالت «کاملاً فول‌صفحه لب‌به‌لب» (Edge-to-Edge Fullscreen) با حفظ وسط‌چین شدن عمودی
-        // ====================================================
         function toggleFullScreenReader() {
             isReaderFullScreen = !isReaderFullScreen;
             const mainHeader = document.getElementById('main-app-header');
@@ -2849,7 +3567,7 @@ $initial_sub = function_exists('get_user_subscription_info')
         // ====================================================
         let currentTool = 'pan';
         let currentColor = '#facc15';
-        let currentSizeFactor = 2; // 1=ظریف, 2=معمولی, 3=ضخیم, 4=خیلی ضخیم
+        let currentSizeFactor = 2;
         let pageAnnotations = [];
         let isDrawingAnnot = false;
         let currentStroke = null;
@@ -3326,7 +4044,7 @@ $initial_sub = function_exists('get_user_subscription_info')
                 const res = await fetch('cron_sms.php');
                 const data = await res.json();
                 if (showAlert) {
-                    alert(`بررسی انجام شد.\nبرنامه‌های عقب‌افتاده کاربران ویژه: ${data.overdue_found}\nپیامک ارسال‌شده: ${data.sms_sent}`);
+                    alert(`بررسی انجام شد.\nبرنامه‌های عقب‌افتاده واجد شرایط: ${data.overdue_found}\nپیامک یادآوری ارسال‌شده: ${data.sms_sent}`);
                 }
             } catch (e) {}
         }
@@ -3346,7 +4064,7 @@ $initial_sub = function_exists('get_user_subscription_info')
             initTimeLabels();
             renderCalendar();
             fetchUserPdfs();
-            document.getElementById('calendar-scroll-area').scrollTop = 7 * 60;
+            document.getElementById('calendar-scroll-area').scrollTop = 7 * hourHeightPx;
 
             if (new URLSearchParams(window.location.search).get('tab') === 'pdf') {
                 switchMainSection('pdf');

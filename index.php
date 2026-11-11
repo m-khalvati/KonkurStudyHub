@@ -4,7 +4,6 @@ require_login();
 
 $user_id = (int)$_SESSION['user_id'];
 
-// مقادیر پیش‌فرض ایمن در صورتی که ثوابت در config.php تعریف نشده باشند
 if (!defined('TELEGRAM_SALES_ID'))  define('TELEGRAM_SALES_ID', 'YourTelegramID');
 if (!defined('FREE_MAX_PDF_COUNT')) define('FREE_MAX_PDF_COUNT', 1);
 if (!defined('FREE_MAX_PDF_MB'))    define('FREE_MAX_PDF_MB', 3);
@@ -12,7 +11,7 @@ if (!defined('VIP_MAX_PDF_MB'))     define('VIP_MAX_PDF_MB', 64);
 if (!defined('PLAN_1M_PRICE'))      define('PLAN_1M_PRICE', '۵۰۰,۰۰۰');
 if (!defined('PLAN_3M_PRICE'))      define('PLAN_3M_PRICE', '۱,۲۰۰,۰۰۰');
 
-// ارتقای خودکار جداول دیتابیس (بدون نیاز به اجرای دستی SQL در phpMyAdmin)
+// ارتقای خودکار جداول دیتابیس
 try {
     $pdo->exec("
         CREATE TABLE IF NOT EXISTS `calendar_categories` (
@@ -81,7 +80,6 @@ try {
     }
 } catch (Exception $ignore) {}
 
-// دریافت وضعیت اشتراک کاربر در لحظه بارگذاری صفحه
 $initial_sub = function_exists('get_user_subscription_info')
     ? get_user_subscription_info($pdo, $user_id)
     : [
@@ -101,16 +99,16 @@ $initial_sub = function_exists('get_user_subscription_info')
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>داشبورد هوشمند مطالعه و تقویم کنکور v3.0</title>
+    <title>داشبورد هوشمند مطالعه، تقویم و جزوه‌خوان کنکور v4.1</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css" rel="stylesheet">
     
-    <!-- بارگذاری نسخه 3.11.174 از سرور بدون اختلال jsDelivr (به همراه پشتیبان خودکار unpkg) -->
+    <!-- بارگذاری نسخه 3.11.174 از سرور بدون اختلال jsDelivr به همراه پشتیبان خودکار unpkg -->
     <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"
             onerror="this.onerror=null;this.src='https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.min.js';"></script>
 
     <style>
-        body { font-family: 'Vazirmatn', sans-serif; -webkit-tap-highlight-color: transparent; }
+        body { font-family: 'Vazirmatn', sans-serif; -webkit-tap-highlight-color: transparent; overscroll-behavior: none; }
         .hour-row { height: 60px; }
         .calendar-scroll::-webkit-scrollbar { width: 5px; height: 5px; }
         .calendar-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
@@ -131,28 +129,38 @@ $initial_sub = function_exists('get_user_subscription_info')
             box-shadow: 0 10px 20px -5px rgba(0, 0, 0, 0.35);
         }
 
-        /* قفل کردن جهت LTR روی بوم PDF برای جلوگیری ۱۰۰٪ از به هم ریختن فونت‌های فارسی و انگلیسی */
-        #pdf-canvas-wrapper,
-        #pdf-render-canvas,
-        #pdf-annot-canvas {
+        /* قفل کردن کامل ابعاد و وسط‌چین کردن عمودی و افقی جزوه در صفحه موبایل */
+        #pdf-canvas-wrapper {
             direction: ltr !important;
             text-align: left !important;
             unicode-bidi: isolate !important;
             font-family: sans-serif !important;
             letter-spacing: normal !important;
+            flex-shrink: 0 !important;
+            margin: auto !important;
+        }
+        #pdf-render-canvas,
+        #pdf-annot-canvas {
+            direction: ltr !important;
+            text-align: left !important;
+            unicode-bidi: isolate !important;
+            width: 100% !important;
+            height: 100% !important;
+            display: block !important;
+            max-width: none !important;
         }
     </style>
 </head>
 <body class="bg-slate-100 text-slate-800 h-screen flex flex-col overflow-hidden select-none">
 
     <!-- ==================================================== -->
-    <!-- ۱. هدر اصلی سامانه (شامل نشانگر وضعیت اشتراک و دکمه پنل ادمین) -->
+    <!-- ۱. هدر اصلی سامانه (شامل لینک مقاله‌خوان، وضعیت اشتراک و پنل ادمین) -->
     <!-- ==================================================== -->
     <header id="main-app-header" class="bg-slate-900 text-white px-3 md:px-4 py-2 flex flex-wrap items-center justify-between gap-2 shadow-md z-30 shrink-0">
         <div class="flex items-center gap-2 md:gap-3">
             <div class="flex items-center gap-1.5">
                 <span class="bg-indigo-600 text-white px-2 py-1 rounded-lg font-extrabold text-xs">🎯 کنکور</span>
-                <span class="font-bold text-xs md:text-sm truncate max-w-[90px] sm:max-w-none"><?php echo htmlspecialchars($_SESSION['full_name']); ?></span>
+                <span class="font-bold text-xs md:text-sm truncate max-w-[85px] sm:max-w-none"><?php echo htmlspecialchars($_SESSION['full_name']); ?></span>
             </div>
 
             <nav class="flex bg-slate-800 p-0.5 rounded-xl border border-slate-700">
@@ -169,7 +177,6 @@ $initial_sub = function_exists('get_user_subscription_info')
         </div>
 
         <div class="flex items-center gap-1.5 md:gap-2 text-xs">
-            <!-- دکمه وضعیت اشتراک (عادی یا ویژه) -->
             <button type="button" id="header-sub-btn" onclick="openSubscriptionModal()" class="<?php echo $initial_sub['is_vip'] ? 'bg-gradient-to-r from-amber-500 to-yellow-400 text-slate-950' : 'bg-indigo-600 hover:bg-indigo-500 text-white border border-indigo-400'; ?> px-2.5 py-1.5 rounded-lg font-extrabold flex items-center gap-1 shadow-xs transition">
                 <?php if ($initial_sub['is_vip']): ?>
                     <span>👑 ویژه (<?php echo $initial_sub['days_left']; ?> روز | +تمدید)</span>
@@ -178,9 +185,8 @@ $initial_sub = function_exists('get_user_subscription_info')
                 <?php endif; ?>
             </button>
 
-            <!-- دکمه ورود به پنل ادمین (فقط برای مدیر سایت) -->
             <?php if (!empty($initial_sub['is_admin'])): ?>
-                <a href="admin.php" class="bg-slate-800 hover:bg-slate-700 border border-amber-500/50 text-amber-300 px-2.5 py-1.5 rounded-lg font-bold flex items-center gap-1 transition" title="ورود به پنل مدیریت کاربران و اشتراک‌ها">
+                <a href="admin.php" class="bg-slate-800 hover:bg-slate-700 border border-amber-500/50 text-amber-300 px-2.5 py-1.5 rounded-lg font-bold flex items-center gap-1 transition" title="ورود به پنل مدیریت">
                     <span>🛠️</span>
                     <span class="hidden lg:inline">مدیریت</span>
                 </a>
@@ -209,7 +215,6 @@ $initial_sub = function_exists('get_user_subscription_info')
     <!-- ==================================================== -->
     <main id="section-calendar" class="flex-1 flex flex-col overflow-hidden">
         
-        <!-- نوار آمار تفکیک‌شده (مطالعه درسی خالص در برابر کارهای متفرقه) -->
         <div class="bg-slate-800 text-slate-200 px-3 py-1.5 flex items-center justify-between gap-3 overflow-x-auto text-[11px] md:text-xs shrink-0 border-b border-slate-700">
             <div class="flex items-center gap-3 md:gap-5 shrink-0">
                 <div class="flex items-center gap-1 bg-slate-900/70 px-2 py-0.5 rounded-md border border-slate-700">
@@ -220,7 +225,7 @@ $initial_sub = function_exists('get_user_subscription_info')
                     <span class="text-emerald-300">✅ مطالعه واقعی:</span>
                     <span id="stat-completed-hours" class="font-extrabold text-emerald-400">0 ساعت</span>
                 </div>
-                <div class="flex items-center gap-1 bg-purple-950/60 px-2 py-0.5 rounded-md border border-purple-700/50" title="کارهای متفرقه جدا از ساعت مطالعه کنکور محاسبه می‌شوند">
+                <div class="flex items-center gap-1 bg-purple-950/60 px-2 py-0.5 rounded-md border border-purple-700/50">
                     <span class="text-purple-300">🧩 کارهای متفرقه:</span>
                     <span id="stat-misc-hours" class="font-extrabold text-purple-200">0 از 0 ساعت</span>
                 </div>
@@ -235,7 +240,6 @@ $initial_sub = function_exists('get_user_subscription_info')
             </div>
         </div>
 
-        <!-- نوار ابزار کنترل تقویم + فیلتر نمایش + کپی روز -->
         <div class="bg-white border-b border-slate-200 px-3 py-2 flex flex-wrap items-center justify-between gap-2 shrink-0">
             <div class="flex items-center gap-1.5">
                 <button type="button" onclick="navigateCalendar(-1)" class="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs font-bold transition">❮</button>
@@ -283,7 +287,7 @@ $initial_sub = function_exists('get_user_subscription_info')
     </main>
 
     <!-- ==================================================== -->
-    <!-- ۳. بخش دوم: جزوه‌خوان تمام‌صفحه با پوشه‌بندی آکاردئونی و ورق زدن لمسی -->
+    <!-- ۳. بخش دوم: جزوه‌خوان حرفه‌ای (وسط‌چین عمودی و افقی + زوم قفل‌شده روی انگشتان + قلم مات) -->
     <!-- ==================================================== -->
     <section id="section-pdf" class="hidden flex-1 flex overflow-hidden relative bg-slate-900">
         
@@ -303,20 +307,18 @@ $initial_sub = function_exists('get_user_subscription_info')
                 </div>
             </div>
 
-            <!-- بنر وضعیت سهمیه آپلود PDF (عادی در برابر ویژه) -->
-            <div id="pdf-quota-banner" class="px-3 py-2 text-[11px] border-b border-slate-200 flex items-center justify-between bg-amber-50 text-amber-900">
-                <!-- توسط جاوااسکریپت بروزرسانی می‌شود -->
-            </div>
+            <div id="pdf-quota-banner" class="px-3 py-2 text-[11px] border-b border-slate-200 flex items-center justify-between bg-amber-50 text-amber-900"></div>
 
             <div id="pdf-list-container" class="flex-1 overflow-y-auto p-2.5 space-y-2.5 calendar-scroll bg-slate-50/60"></div>
         </aside>
 
         <div class="flex-1 flex flex-col overflow-hidden relative bg-slate-800">
             
+            <!-- نوار بالای جزوه‌خوان -->
             <div id="pdf-top-bar" class="bg-slate-900/95 text-white border-b border-slate-700 px-2.5 py-1.5 flex items-center justify-between gap-2 shrink-0 z-20">
                 <div class="flex items-center gap-1.5 min-w-0">
                     <button type="button" onclick="togglePdfSidebar()" class="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-xs font-bold text-white shrink-0 shadow-xs">
-                        ☰ پوشه‌ها و جزوات
+                        ☰ پوشه‌ها
                     </button>
                     <span id="active-pdf-title" class="text-xs font-bold text-slate-200 truncate">
                         جزوه‌ای انتخاب نشده
@@ -332,30 +334,36 @@ $initial_sub = function_exists('get_user_subscription_info')
                     </div>
                     <button type="button" onclick="changePdfPage(1)" class="px-2 py-1 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs font-bold" title="صفحه بعد">❯</button>
 
-                    <button type="button" id="btn-star-page" onclick="toggleStarCurrentPage()" class="px-2 py-1 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs font-bold text-slate-400 transition" title="نشان کردن این صفحه به عنوان صفحه مهم">
+                    <button type="button" id="btn-star-page" onclick="toggleStarCurrentPage()" class="px-2 py-1 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs font-bold text-slate-400 transition" title="نشان کردن صفحه مهم">
                         ☆
                     </button>
-                    <button type="button" onclick="openStarredModal()" class="px-2 py-1 bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-lg text-[11px] font-bold" title="مشاهده صفحات مهم این جزوه">
+                    <button type="button" onclick="openStarredModal()" class="px-2 py-1 bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-lg text-[11px] font-bold" title="مشاهده صفحات ستاره‌دار">
                         ⭐ <span id="starred-count-badge">0</span>
                     </button>
                 </div>
 
-                <button type="button" onclick="toggleFullScreenReader()" id="btn-fullscreen-reader" class="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-bold shrink-0" title="حالت تمام‌صفحه">
-                    ⛶ تمام‌صفحه
+                <button type="button" onclick="toggleFullScreenReader()" id="btn-fullscreen-reader" class="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-extrabold shrink-0 shadow-2xs transition" title="حالت کاملاً فول‌صفحه (اندازه کل صفحه نمایش)">
+                    ⛶ فول‌صفحه
                 </button>
             </div>
 
-            <div id="pdf-viewport-container" class="flex-1 overflow-auto p-1 sm:p-3 flex justify-center items-start calendar-scroll relative">
+            <!-- دکمه شناور خروج از حالت کاملاً فول‌صفحه -->
+            <button type="button" id="floating-exit-fullscreen-btn" onclick="toggleFullScreenReader()" class="hidden fixed top-3 right-3 z-50 bg-rose-600/90 hover:bg-rose-600 text-white px-3 py-1.5 rounded-full shadow-2xl border border-white/30 text-xs font-extrabold items-center gap-1 backdrop-blur-xs transition">
+                <span>✕ خروج از فول‌صفحه</span>
+            </button>
+
+            <!-- ناحیه نمایش بوم جزوه (وسط‌چین عمودی و افقی با فضای تنفس برای زوم راحت) -->
+            <div id="pdf-viewport-container" class="flex-1 overflow-auto py-6 px-1 sm:p-4 flex calendar-scroll relative">
                 
-                <div id="pdf-loading-overlay" class="hidden my-auto text-center bg-slate-900/95 text-white p-6 rounded-2xl shadow-xl border border-slate-700 z-30">
+                <div id="pdf-loading-overlay" class="hidden m-auto text-center bg-slate-900/95 text-white p-6 rounded-2xl shadow-xl border border-slate-700 z-30">
                     <div class="text-3xl mb-2 animate-bounce">⏳</div>
-                    <div id="pdf-loading-text" class="text-xs font-bold text-indigo-300">در حال بارگذاری و آماده‌سازی تمام صفحات جزوه...</div>
+                    <div id="pdf-loading-text" class="text-xs font-bold text-indigo-300">در حال بارگذاری و آماده‌سازی صفحات جزوه...</div>
                 </div>
 
-                <div id="pdf-empty-state" class="my-auto text-center bg-slate-900/90 text-white p-6 rounded-2xl shadow-xl max-w-xs border border-slate-700">
+                <div id="pdf-empty-state" class="m-auto text-center bg-slate-900/90 text-white p-6 rounded-2xl shadow-xl max-w-xs border border-slate-700">
                     <div class="text-4xl mb-2">📖</div>
                     <h4 class="font-bold text-sm mb-1">جزوه‌ای باز نیست</h4>
-                    <p class="text-slate-400 text-xs mb-4 leading-relaxed">از منوی «پوشه‌ها و جزوات» یک درس را انتخاب کنید یا فایل PDF جدیدی آپلود نمایید.</p>
+                    <p class="text-slate-400 text-xs mb-4 leading-relaxed">از منوی «پوشه‌ها» یک درس را انتخاب کنید یا فایل PDF جدیدی آپلود نمایید.</p>
                     <div class="flex flex-wrap gap-2 justify-center">
                         <button type="button" onclick="togglePdfSidebar()" class="bg-slate-700 hover:bg-slate-600 text-white px-3 py-2 rounded-lg text-xs font-bold">
                             ☰ باز کردن پوشه‌ها
@@ -366,13 +374,14 @@ $initial_sub = function_exists('get_user_subscription_info')
                     </div>
                 </div>
 
-                <!-- بوم رندر PDF + لایه علامت‌گذاری (ایزوله‌شده با dir="ltr") -->
-                <div id="pdf-canvas-wrapper" dir="ltr" class="hidden relative shadow-2xl bg-white">
+                <!-- بوم رندر PDF + لایه علامت‌گذاری -->
+                <div id="pdf-canvas-wrapper" dir="ltr" class="hidden relative shadow-2xl bg-white shrink-0">
                     <canvas id="pdf-render-canvas" dir="ltr" class="block"></canvas>
                     <canvas id="pdf-annot-canvas" dir="ltr" class="absolute inset-0 pointer-events-none"></canvas>
                 </div>
             </div>
 
+            <!-- کنترل شناور ورق زدن صفحه در پایین راست -->
             <div id="pdf-floating-bottom-bar" class="hidden fixed bottom-4 right-4 z-30 items-center gap-1.5">
                 <button type="button" onclick="changePdfPage(-1)" class="w-9 h-9 rounded-full bg-slate-900/90 text-white shadow-lg border border-slate-700 font-bold text-sm flex items-center justify-center">❮</button>
                 <span id="floating-page-pill" class="bg-slate-900/90 text-white px-3 py-1.5 rounded-full text-xs font-bold shadow-lg border border-slate-700">
@@ -381,48 +390,89 @@ $initial_sub = function_exists('get_user_subscription_info')
                 <button type="button" onclick="changePdfPage(1)" class="w-9 h-9 rounded-full bg-slate-900/90 text-white shadow-lg border border-slate-700 font-bold text-sm flex items-center justify-center">❯</button>
             </div>
 
+            <!-- دکمه شناور باز کردن جعبه ابزار پیشرفته در پایین چپ -->
             <button type="button" id="pdf-fab-btn" onclick="toggleToolsPopup()" class="hidden fixed bottom-4 left-4 z-40 bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2.5 rounded-full shadow-2xl font-extrabold text-xs items-center gap-1.5 border-2 border-white/20 transition transform active:scale-95">
                 <span id="fab-active-icon">✋</span>
-                <span>ابزارها و علامت‌گذاری</span>
+                <span>ابزارها و قلم‌ها</span>
+                <span id="fab-color-dot" class="w-3 h-3 rounded-full border border-white" style="background-color: #facc15;"></span>
             </button>
 
-            <div id="pdf-tools-popup" class="hidden fixed bottom-16 left-4 z-40 bg-slate-900/95 text-white p-3.5 rounded-2xl shadow-2xl border border-slate-700 w-72 max-w-[92vw] backdrop-blur-md space-y-3 text-xs">
+            <!-- ==================================================== -->
+            <!-- پاپ‌آپ جعبه ابزار پیشرفته جزوه‌خوان -->
+            <!-- ==================================================== -->
+            <div id="pdf-tools-popup" class="hidden fixed bottom-16 left-4 z-40 bg-slate-900/95 text-white p-3.5 rounded-2xl shadow-2xl border border-slate-700 w-80 max-w-[94vw] max-h-[82vh] overflow-y-auto calendar-scroll backdrop-blur-md space-y-3 text-xs">
                 <div class="flex items-center justify-between border-b border-slate-700 pb-2">
-                    <span class="font-extrabold text-slate-200">🛠️ جعبه ابزار جزوه‌خوان</span>
+                    <span class="font-extrabold text-slate-200">🛠️ استودیو حاشیه‌نویسی جزوه</span>
                     <div class="flex items-center gap-2">
                         <span id="annot-save-status" class="text-[10px] font-bold text-emerald-400">✓ آماده</span>
                         <button type="button" onclick="toggleToolsPopup()" class="text-slate-400 hover:text-white text-lg font-bold leading-none">&times;</button>
                     </div>
                 </div>
 
+                <!-- ۱. انتخاب ابزار -->
                 <div class="grid grid-cols-2 gap-1.5">
                     <button type="button" onclick="setAnnotTool('pan', true)" id="tool-pan" class="annot-tool-btn px-2.5 py-2 rounded-xl font-bold bg-indigo-600 text-white flex items-center gap-1.5">
-                        <span>✋</span><span>مطالعه / ورق‌زدن</span>
+                        <span>✋</span><span>مطالعه / زوم</span>
+                    </button>
+                    <button type="button" onclick="setAnnotTool('pen', true)" id="tool-pen" class="annot-tool-btn px-2.5 py-2 rounded-xl font-bold bg-slate-800 hover:bg-slate-700 text-slate-200 flex items-center gap-1.5">
+                        <span>✏️</span><span>قلم خودکاری (مات)</span>
                     </button>
                     <button type="button" onclick="setAnnotTool('highlight', true)" id="tool-highlight" class="annot-tool-btn px-2.5 py-2 rounded-xl font-bold bg-slate-800 hover:bg-slate-700 text-slate-200 flex items-center gap-1.5">
                         <span>🖍️</span><span>ماژیک هایلایت</span>
                     </button>
-                    <button type="button" onclick="setAnnotTool('pen', true)" id="tool-pen" class="annot-tool-btn px-2.5 py-2 rounded-xl font-bold bg-slate-800 hover:bg-slate-700 text-slate-200 flex items-center gap-1.5">
-                        <span>✏️</span><span>قلم نوری / دست‌خط</span>
+                    <button type="button" onclick="setAnnotTool('line', true)" id="tool-line" class="annot-tool-btn px-2.5 py-2 rounded-xl font-bold bg-slate-800 hover:bg-slate-700 text-slate-200 flex items-center gap-1.5">
+                        <span>📏</span><span>خط‌کش (خط صاف)</span>
+                    </button>
+                    <button type="button" onclick="setAnnotTool('rect', true)" id="tool-rect" class="annot-tool-btn px-2.5 py-2 rounded-xl font-bold bg-slate-800 hover:bg-slate-700 text-slate-200 flex items-center gap-1.5">
+                        <span>⬜</span><span>کادر دور فرمول</span>
                     </button>
                     <button type="button" onclick="setAnnotTool('note', true)" id="tool-note" class="annot-tool-btn px-2.5 py-2 rounded-xl font-bold bg-slate-800 hover:bg-slate-700 text-slate-200 flex items-center gap-1.5">
-                        <span>📌</span><span>ثبت یادداشت</span>
+                        <span>📌</span><span>سنجاق یادداشت</span>
                     </button>
                     <button type="button" onclick="setAnnotTool('eraser', true)" id="tool-eraser" class="col-span-2 annot-tool-btn px-2.5 py-1.5 rounded-xl font-bold bg-slate-800 hover:bg-slate-700 text-slate-200 flex items-center justify-center gap-1.5">
-                        <span>🧽</span><span>پاک‌کن (لمس روی خط یا یادداشت)</span>
+                        <span>🧽</span><span>پاک‌کن (لمس روی خط، کادر یا یادداشت)</span>
                     </button>
                 </div>
 
-                <div class="flex items-center justify-between bg-slate-800 p-2 rounded-xl">
-                    <span class="text-[11px] text-slate-300 font-bold">رنگ قلم/ماژیک:</span>
-                    <div class="flex items-center gap-2">
-                        <button type="button" onclick="setAnnotColor('#facc15')" data-color="#facc15" class="annot-color-btn w-6 h-6 rounded-full bg-yellow-400 ring-2 ring-white scale-110 transition"></button>
-                        <button type="button" onclick="setAnnotColor('#4ade80')" data-color="#4ade80" class="annot-color-btn w-6 h-6 rounded-full bg-green-400 opacity-60 hover:opacity-100 transition"></button>
-                        <button type="button" onclick="setAnnotColor('#38bdf8')" data-color="#38bdf8" class="annot-color-btn w-6 h-6 rounded-full bg-sky-400 opacity-60 hover:opacity-100 transition"></button>
-                        <button type="button" onclick="setAnnotColor('#fb7185')" data-color="#fb7185" class="annot-color-btn w-6 h-6 rounded-full bg-rose-400 opacity-60 hover:opacity-100 transition"></button>
+                <!-- ۲. پالت رنگ گسترده -->
+                <div class="bg-slate-800 p-2.5 rounded-xl space-y-2">
+                    <div class="flex items-center justify-between text-[11px] text-slate-300 font-bold">
+                        <span>🎨 رنگ قلم / ماژیک:</span>
+                        <span class="text-[10px] text-amber-300">⬜ سفید = غلط‌گیر پوشش جواب</span>
+                    </div>
+                    <div class="grid grid-cols-6 gap-2 pt-0.5 items-center justify-items-center">
+                        <button type="button" onclick="setAnnotColor('#0f172a')" data-color="#0f172a" title="مشکی ذغالی (مات)" class="annot-color-btn w-6 h-6 rounded-full bg-slate-950 border border-slate-500 opacity-75 hover:opacity-100 transition"></button>
+                        <button type="button" onclick="setAnnotColor('#1d4ed8')" data-color="#1d4ed8" title="آبی خودکاری (مات)" class="annot-color-btn w-6 h-6 rounded-full bg-blue-700 opacity-75 hover:opacity-100 transition"></button>
+                        <button type="button" onclick="setAnnotColor('#dc2626')" data-color="#dc2626" title="قرمز خودکاری (مات)" class="annot-color-btn w-6 h-6 rounded-full bg-red-600 opacity-75 hover:opacity-100 transition"></button>
+                        <button type="button" onclick="setAnnotColor('#15803d')" data-color="#15803d" title="سبز تیره (مات)" class="annot-color-btn w-6 h-6 rounded-full bg-green-700 opacity-75 hover:opacity-100 transition"></button>
+                        <button type="button" onclick="setAnnotColor('#7e22ce')" data-color="#7e22ce" title="بنفش (مات)" class="annot-color-btn w-6 h-6 rounded-full bg-purple-700 opacity-75 hover:opacity-100 transition"></button>
+                        <button type="button" onclick="setAnnotColor('#ffffff')" data-color="#ffffff" title="سفید غلط‌گیر (پوشاندن جواب تست)" class="annot-color-btn w-6 h-6 rounded-full bg-white border-2 border-slate-400 opacity-85 hover:opacity-100 transition"></button>
+
+                        <button type="button" onclick="setAnnotColor('#facc15')" data-color="#facc15" title="زرد طلایی" class="annot-color-btn w-6 h-6 rounded-full bg-yellow-400 ring-2 ring-white scale-110 transition"></button>
+                        <button type="button" onclick="setAnnotColor('#4ade80')" data-color="#4ade80" title="سبز فسفری" class="annot-color-btn w-6 h-6 rounded-full bg-green-400 opacity-75 hover:opacity-100 transition"></button>
+                        <button type="button" onclick="setAnnotColor('#38bdf8')" data-color="#38bdf8" title="آبی آسمانی" class="annot-color-btn w-6 h-6 rounded-full bg-sky-400 opacity-75 hover:opacity-100 transition"></button>
+                        <button type="button" onclick="setAnnotColor('#fb7185')" data-color="#fb7185" title="صورتی / مرجانی" class="annot-color-btn w-6 h-6 rounded-full bg-rose-400 opacity-75 hover:opacity-100 transition"></button>
+                        <button type="button" onclick="setAnnotColor('#ea580c')" data-color="#ea580c" title="نارنجی" class="annot-color-btn w-6 h-6 rounded-full bg-orange-600 opacity-75 hover:opacity-100 transition"></button>
+                        
+                        <label title="انتخاب هر رنگ دلخواه" class="w-6 h-6 rounded-full bg-gradient-to-tr from-pink-500 via-amber-400 to-cyan-400 flex items-center justify-center cursor-pointer border border-white/60">
+                            <input type="color" id="custom-annot-color-picker" onchange="setAnnotColor(this.value)" class="sr-only">
+                            <span class="text-[10px]">🎨</span>
+                        </label>
                     </div>
                 </div>
 
+                <!-- ۳. انتخاب ضخامت نوک قلم / ماژیک -->
+                <div class="bg-slate-800 p-2 rounded-xl flex items-center justify-between">
+                    <span class="text-[11px] text-slate-300 font-bold">📏 ضخامت قلم:</span>
+                    <div class="flex items-center gap-1">
+                        <button type="button" onclick="setAnnotSize(1)" id="size-btn-1" class="annot-size-btn px-2 py-1 rounded-lg text-[10px] font-bold bg-slate-700 text-slate-300">ظریف</button>
+                        <button type="button" onclick="setAnnotSize(2)" id="size-btn-2" class="annot-size-btn px-2 py-1 rounded-lg text-[10px] font-extrabold bg-indigo-600 text-white">معمولی</button>
+                        <button type="button" onclick="setAnnotSize(3)" id="size-btn-3" class="annot-size-btn px-2 py-1 rounded-lg text-[10px] font-bold bg-slate-700 text-slate-300">ضخیم</button>
+                        <button type="button" onclick="setAnnotSize(4)" id="size-btn-4" class="annot-size-btn px-2 py-1 rounded-lg text-[10px] font-bold bg-slate-700 text-slate-300">خیلی ضخیم</button>
+                    </div>
+                </div>
+
+                <!-- ۴. بزرگ‌نمایی، فول‌صفحه و حالت شب -->
                 <div class="grid grid-cols-4 gap-1.5 pt-1 border-t border-slate-700">
                     <button type="button" onclick="adjustZoom(-0.2)" class="py-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg font-bold text-center">➖ زوم</button>
                     <button type="button" onclick="setFitWidthZoom()" class="py-1.5 bg-indigo-950 text-indigo-300 border border-indigo-700 rounded-lg font-bold text-center">↔ عرض</button>
@@ -430,9 +480,11 @@ $initial_sub = function_exists('get_user_subscription_info')
                     <button type="button" onclick="togglePdfDarkMode()" id="btn-pdf-dark" class="py-1.5 bg-slate-800 text-amber-300 hover:bg-slate-700 rounded-lg font-bold text-center">🌙 شب</button>
                 </div>
 
-                <div class="flex gap-1.5 pt-1 border-t border-slate-700">
-                    <button type="button" onclick="undoLastAnnotation()" class="flex-1 py-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg font-bold text-slate-200">↩ واگرد (Undo)</button>
-                    <button type="button" onclick="clearAllPageAnnotations()" class="flex-1 py-1.5 bg-rose-950/80 hover:bg-rose-700 text-rose-200 rounded-lg font-bold">🗑️ پاکسازی صفحه</button>
+                <!-- ۵. واگرد، پاکسازی صفحه و دانلود عکس صفحه با دست‌خط‌ها -->
+                <div class="grid grid-cols-3 gap-1.5 pt-1 border-t border-slate-700">
+                    <button type="button" onclick="undoLastAnnotation()" class="py-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg font-bold text-slate-200 text-center">↩ واگرد</button>
+                    <button type="button" onclick="downloadAnnotatedPageImage()" class="py-1.5 bg-emerald-900/80 hover:bg-emerald-700 text-emerald-200 rounded-lg font-bold text-center" title="ذخیره تصویر این صفحه به همراه هایلایت‌ها و دست‌خط‌ها">📸 عکس صفحه</button>
+                    <button type="button" onclick="clearAllPageAnnotations()" class="py-1.5 bg-rose-950/80 hover:bg-rose-700 text-rose-200 rounded-lg font-bold text-center">🗑️ پاکسازی</button>
                 </div>
             </div>
         </div>
@@ -474,7 +526,7 @@ $initial_sub = function_exists('get_user_subscription_info')
     </div>
 
     <!-- ==================================================== -->
-    <!-- ۵. مودال ثبت و ویرایش برنامه تقویم (با قفل پیامک برای کاربران عادی) -->
+    <!-- ۵. مودال ثبت و ویرایش برنامه تقویم -->
     <!-- ==================================================== -->
     <div id="event-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs hidden items-end sm:items-center justify-center sm:p-4 z-50">
         <div class="bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-lg max-h-[94vh] flex flex-col overflow-hidden">
@@ -531,7 +583,7 @@ $initial_sub = function_exists('get_user_subscription_info')
                             </select>
                         </div>
                         <div>
-                            <span class="block text-[10px] font-bold text-slate-600 mb-1">انتخاب رنگ اختصاصی (متمایز از ۵ رنگ اصلی):</span>
+                            <span class="block text-[10px] font-bold text-slate-600 mb-1">انتخاب رنگ اختصاصی:</span>
                             <div id="custom-color-palette" class="flex flex-wrap items-center gap-2"></div>
                         </div>
                         <div class="flex justify-end">
@@ -542,7 +594,6 @@ $initial_sub = function_exists('get_user_subscription_info')
                     </div>
                 </div>
 
-                <!-- تکرار روتین + پیامک یادآوری (قفل برای کاربران عادی) -->
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 bg-slate-50 p-2.5 rounded-xl border border-slate-200">
                     <div id="repeat-mode-wrapper">
                         <label class="block font-bold text-slate-700 mb-1">🔁 تکرار روتین در این هفته</label>
@@ -634,11 +685,10 @@ $initial_sub = function_exists('get_user_subscription_info')
     </div>
 
     <!-- ==================================================== -->
-    <!-- ۶. مودال خرید و تمدید اشتراک ویژه (VIP) + ارجاع هوشمند به تلگرام -->
+    <!-- ۶. مودال خرید و تمدید اشتراک ویژه (VIP) -->
     <!-- ==================================================== -->
     <div id="subscription-modal" class="fixed inset-0 bg-slate-900/75 backdrop-blur-xs hidden items-end sm:items-center justify-center sm:p-4 z-50">
         <div class="bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl w-full max-w-2xl max-h-[94vh] flex flex-col overflow-hidden">
-            <!-- هدر طلایی/سرمه‌ای اشتراک -->
             <div class="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white px-5 py-4 flex items-center justify-between shrink-0">
                 <div class="flex items-center gap-2.5">
                     <span class="text-2xl">👑</span>
@@ -651,49 +701,43 @@ $initial_sub = function_exists('get_user_subscription_info')
             </div>
 
             <div class="p-4 sm:p-5 overflow-y-auto calendar-scroll space-y-4 text-xs">
-                
-                <!-- پیام هشدار در صورتی که کاربر به خاطر محدودیت ۳ مگابایت یا ۱ فایل یا پیامک به این پنجره هدایت شده باشد -->
                 <div id="sub-modal-reason-alert" class="hidden bg-rose-50 border border-rose-200 text-rose-800 px-3.5 py-2.5 rounded-xl font-bold leading-relaxed"></div>
 
-                <!-- مقایسه امکانات کاربر عادی و کاربر ویژه -->
                 <div class="bg-slate-50 rounded-2xl p-3.5 border border-slate-200">
                     <h4 class="font-extrabold text-slate-800 mb-2.5 text-xs">✨ با تهیه اشتراک ویژه چه امکاناتی برای شما باز می‌شود؟</h4>
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                         <div class="bg-white p-2.5 rounded-xl border border-slate-200 flex items-start gap-2">
                             <span class="text-base">📚</span>
                             <div>
-                                <div class="font-extrabold text-slate-800">آپلود نامحدود جزوات و کتاب‌ها</div>
-                                <div class="text-[11px] text-slate-500 mt-0.5">بدون محدودیت ۱ فایل! تمام کتاب‌ها و جزوات هر درس را در پوشه‌های مجزا ذخیره کنید.</div>
+                                <div class="font-extrabold text-slate-800">آپلود نامحدود جزوات و مقالات</div>
+                                <div class="text-[11px] text-slate-500 mt-0.5">بدون محدودیت ۱ فایل! تمام کتاب‌ها، جزوات و مقالات را ذخیره کنید.</div>
                             </div>
                         </div>
                         <div class="bg-white p-2.5 rounded-xl border border-slate-200 flex items-start gap-2">
                             <span class="text-base">🚀</span>
                             <div>
                                 <div class="font-extrabold text-slate-800">حجم هر فایل تا <?php echo VIP_MAX_PDF_MB; ?> مگابایت</div>
-                                <div class="text-[11px] text-slate-500 mt-0.5">حذف محدودیت ۳ مگابایت کاربر عادی و امکان آپلود PDFهای سنگین و اسکن‌شده.</div>
+                                <div class="text-[11px] text-slate-500 mt-0.5">حذف محدودیت ۳ مگابایت کاربر عادی و آپلود جزوات حجیم.</div>
                             </div>
                         </div>
                         <div class="bg-white p-2.5 rounded-xl border border-slate-200 flex items-start gap-2">
                             <span class="text-base">📱</span>
                             <div>
                                 <div class="font-extrabold text-slate-800">پیامک هوشمند پیگیری برنامه (sms.ir)</div>
-                                <div class="text-[11px] text-slate-500 mt-0.5">ارسال خودکار پیامک خدماتی در صورت گذشتن زمان برنامه و تیک نخوردن آن در تقویم.</div>
+                                <div class="text-[11px] text-slate-500 mt-0.5">ارسال خودکار پیامک خدماتی در صورت تیک نخوردن برنامه در تقویم.</div>
                             </div>
                         </div>
                         <div class="bg-white p-2.5 rounded-xl border border-slate-200 flex items-start gap-2">
-                            <span class="text-base">🔄</span>
+                            <span class="text-base">🧠</span>
                             <div>
-                                <div class="font-extrabold text-slate-800">قابلیت تمدید زودهنگام تجمعی</div>
-                                <div class="text-[11px] text-slate-500 mt-0.5">در صورت تمدید قبل از اتمام اشتراک، روزهای جدید دقیقاً به ادامه اعتبار قبلی شما اضافه می‌شود.</div>
+                                <div class="font-extrabold text-slate-800">مترجم هوش مصنوعی در مقاله‌خوان</div>
+                                <div class="text-[11px] text-slate-500 mt-0.5">ترجمه تخصصی و استخراج پیام کلیدی مقالات انگلیسی با هوش مصنوعی.</div>
                             </div>
                         </div>
                     </div>
                 </div>
 
-                <!-- کارت‌های انتخاب پلن ۱ ماهه و ۳ ماهه -->
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                    
-                    <!-- پلن ۱ ماهه -->
                     <div class="border-2 border-slate-200 hover:border-indigo-500 rounded-2xl p-4 flex flex-col justify-between bg-white transition">
                         <div>
                             <div class="flex items-center justify-between mb-2">
@@ -707,7 +751,7 @@ $initial_sub = function_exists('get_user_subscription_info')
                             <ul class="space-y-1.5 text-[11px] text-slate-600 mb-4">
                                 <li>✓ آپلود نامحدود فایل PDF (تا <?php echo VIP_MAX_PDF_MB; ?> مگابایت)</li>
                                 <li>✓ فعال‌سازی پنل پیامک یادآوری تقویم</li>
-                                <li>✓ قابلیت تمدید قبل از اتمام مهلت</li>
+                                <li>✓ دسترسی کامل به هوش مصنوعی مقاله‌خوان</li>
                             </ul>
                         </div>
                         <a id="tg-link-1m" href="#" target="_blank" class="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-extrabold text-center shadow-sm transition flex items-center justify-center gap-1.5">
@@ -715,7 +759,6 @@ $initial_sub = function_exists('get_user_subscription_info')
                         </a>
                     </div>
 
-                    <!-- پلن ۳ ماهه (پیشنهاد ویژه) -->
                     <div class="border-2 border-emerald-500 rounded-2xl p-4 flex flex-col justify-between bg-emerald-50/30 relative shadow-md">
                         <span class="absolute -top-2.5 left-4 bg-emerald-600 text-white text-[10px] font-extrabold px-2.5 py-0.5 rounded-full shadow">
                             🔥 ۳۰۰,۰۰۰ تومان تخفیف ویژه
@@ -733,7 +776,7 @@ $initial_sub = function_exists('get_user_subscription_info')
                             <ul class="space-y-1.5 text-[11px] text-slate-700 mb-4">
                                 <li>✓ <b>۲۰٪ به‌صرفه‌تر</b> (ماهیانه فقط ۴۰۰ هزار تومان)</li>
                                 <li>✓ آپلود نامحدود فایل PDF + تمام پوشه‌ها</li>
-                                <li>✓ پیامک یادآوری بدون محدودیت تا روز کنکور</li>
+                                <li>✓ پیامک یادآوری + هوش مصنوعی مقاله‌خوان</li>
                             </ul>
                         </div>
                         <a id="tg-link-3m" href="#" target="_blank" class="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-extrabold text-center shadow-sm transition flex items-center justify-center gap-1.5">
@@ -742,7 +785,6 @@ $initial_sub = function_exists('get_user_subscription_info')
                     </div>
                 </div>
 
-                <!-- بخش ورود کد فعال‌سازی آنی -->
                 <div class="bg-slate-900 text-white p-3.5 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-3">
                     <div class="text-center sm:text-right">
                         <div class="font-extrabold text-amber-300 text-xs">🎟️ کد فعال‌سازی اشتراک دریافت کرده‌اید؟</div>
@@ -755,13 +797,12 @@ $initial_sub = function_exists('get_user_subscription_info')
                         </button>
                     </form>
                 </div>
-
             </div>
         </div>
     </div>
 
     <!-- ==================================================== -->
-    <!-- ۷. مودال کپی کردن برنامه‌های یک روز به روزی دیگر -->
+    <!-- ۷. سایر مودال‌ها (کپی روز، ساخت پوشه، انتقال جزوه، آپلود، صفحات ستاره‌دار و پیامک) -->
     <!-- ==================================================== -->
     <div id="copy-day-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs hidden items-center justify-center p-4 z-50">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
@@ -790,9 +831,6 @@ $initial_sub = function_exists('get_user_subscription_info')
         </div>
     </div>
 
-    <!-- ==================================================== -->
-    <!-- ۸. مودال ساخت پوشه درسی جدید -->
-    <!-- ==================================================== -->
     <div id="folder-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs hidden items-center justify-center p-4 z-50">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
             <div class="bg-slate-800 text-white px-4 py-3 flex items-center justify-between">
@@ -819,9 +857,6 @@ $initial_sub = function_exists('get_user_subscription_info')
         </div>
     </div>
 
-    <!-- ==================================================== -->
-    <!-- ۹. مودال انتقال جزوه به پوشه دیگر -->
-    <!-- ==================================================== -->
     <div id="move-pdf-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs hidden items-center justify-center p-4 z-50">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
             <div class="bg-slate-800 text-white px-4 py-3 flex items-center justify-between">
@@ -844,9 +879,6 @@ $initial_sub = function_exists('get_user_subscription_info')
         </div>
     </div>
 
-    <!-- ==================================================== -->
-    <!-- ۱۰. مودال آپلود جزوه PDF (با نمایش سقف حجم مجاز کاربر) -->
-    <!-- ==================================================== -->
     <div id="upload-pdf-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs hidden items-center justify-center p-4 z-50">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
             <div class="bg-slate-800 text-white px-4 py-3 flex items-center justify-between">
@@ -877,9 +909,6 @@ $initial_sub = function_exists('get_user_subscription_info')
         </div>
     </div>
 
-    <!-- ==================================================== -->
-    <!-- ۱۱. مودال نمایش صفحات ستاره‌دار جزوه فعال -->
-    <!-- ==================================================== -->
     <div id="starred-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs hidden items-center justify-center p-4 z-50">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
             <div class="bg-slate-800 text-white px-4 py-3 flex items-center justify-between">
@@ -890,9 +919,6 @@ $initial_sub = function_exists('get_user_subscription_info')
         </div>
     </div>
 
-    <!-- ==================================================== -->
-    <!-- ۱۲. مودال تنظیمات شماره موبایل و پیامک یادآوری sms.ir -->
-    <!-- ==================================================== -->
     <div id="phone-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs hidden items-center justify-center p-4 z-50">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
             <div class="bg-slate-800 text-white px-4 py-3 flex items-center justify-between">
@@ -938,12 +964,6 @@ $initial_sub = function_exists('get_user_subscription_info')
                 worker: 'https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js',
                 cmaps: 'https://unpkg.com/pdfjs-dist@3.11.174/cmaps/',
                 fonts: 'https://unpkg.com/pdfjs-dist@3.11.174/standard_fonts/'
-            },
-            {
-                lib: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@2.16.105/build/pdf.min.js',
-                worker: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@2.16.105/build/pdf.worker.min.js',
-                cmaps: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@2.16.105/cmaps/',
-                fonts: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@2.16.105/standard_fonts/'
             }
         ];
         let activeCdnConfig = PDFJS_CDN_LIST[0];
@@ -974,7 +994,7 @@ $initial_sub = function_exists('get_user_subscription_info')
                     }
                 } catch (e) {}
             }
-            throw new Error('موتور نمایشگر PDF به دلیل اختلال اینترنت بارگذاری نشد. لطفاً صفحه را رفرش کنید.');
+            throw new Error('موتور نمایشگر PDF بارگذاری نشد. لطفاً صفحه را رفرش کنید.');
         }
 
         if (typeof window.pdfjsLib !== 'undefined') {
@@ -982,7 +1002,7 @@ $initial_sub = function_exists('get_user_subscription_info')
         }
 
         // ====================================================
-        // متغیرهای پایه، وضعیت اشتراک کاربر و تنظیمات فروش تلگرام
+        // متغیرهای پایه و وضعیت اشتراک کاربر
         // ====================================================
         const TODAY_GREGORIAN   = "<?php echo date('Y-m-d'); ?>";
         const KONKUR_GREGORIAN  = "<?php echo KONKUR_GREGORIAN_DATE; ?>";
@@ -1039,7 +1059,6 @@ $initial_sub = function_exists('get_user_subscription_info')
                 }
             }
 
-            // بنر بالای سایدبار PDF
             const quotaBanner = document.getElementById('pdf-quota-banner');
             if (quotaBanner) {
                 if (userSub.is_vip) {
@@ -1057,7 +1076,6 @@ $initial_sub = function_exists('get_user_subscription_info')
                 }
             }
 
-            // نشان قفل کنار تیک پیامک در مودال تقویم
             const smsLockBadge = document.getElementById('sms-vip-lock-badge');
             const smsCheckbox  = document.getElementById('ev-send-sms');
             if (smsLockBadge && smsCheckbox) {
@@ -1069,7 +1087,6 @@ $initial_sub = function_exists('get_user_subscription_info')
                 }
             }
 
-            // بنر داخل مودال تنظیمات شماره موبایل
             const phoneVipNotice = document.getElementById('phone-modal-vip-notice');
             if (phoneVipNotice) {
                 if (userSub.is_vip) phoneVipNotice.classList.add('hidden');
@@ -1095,7 +1112,6 @@ $initial_sub = function_exists('get_user_subscription_info')
                 reasonBox.classList.add('hidden');
             }
 
-            // ساخت لینک‌های هوشمند تلگرام با متن آماده خودکار
             const actionType = userSub.is_vip ? 'تمدید اشتراک' : 'خرید اشتراک';
             const uName      = userSub.full_name || '';
             const uId        = userSub.username || '';
@@ -1227,9 +1243,6 @@ $initial_sub = function_exists('get_user_subscription_info')
             return ev.category_type !== 'misc' && String(ev.color).toLowerCase() !== '#7c3aed';
         }
 
-        // ====================================================
-        // مدیریت دسته‌ها و رنگ‌های سفارشی کاربر
-        // ====================================================
         function initCustomColorPalette() {
             const container = document.getElementById('custom-color-palette');
             container.innerHTML = CUSTOM_ALLOWED_COLORS.map(c => `
@@ -1269,7 +1282,7 @@ $initial_sub = function_exists('get_user_subscription_info')
                         <input type="radio" name="color" value="${cat.color}" ${isChecked ? 'checked' : ''}>
                         <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background-color:${cat.color}"></span>
                         <span class="text-[11px] font-bold truncate" title="${escapeHtml(cat.name)}">${escapeHtml(cat.name)}</span>
-                        <span class="text-[9px] opacity-75" title="${Number(cat.is_study) === 1 ? 'درسی' : 'متفرقه'}">${studyBadge}</span>
+                        <span class="text-[9px] opacity-75">${studyBadge}</span>
                         ${delBtn}
                     </label>
                 `;
@@ -1321,9 +1334,6 @@ $initial_sub = function_exists('get_user_subscription_info')
             }
         }
 
-        // ====================================================
-        // رندر تقویم + چیدمان کنار هم (Side-by-Side)
-        // ====================================================
         async function renderCalendar() {
             const days = computeVisibleDays();
             const fullWeek = getFullWeekDays(anchorDate);
@@ -1742,7 +1752,6 @@ $initial_sub = function_exists('get_user_subscription_info')
             document.getElementById('ev-start').value = startTime;
             document.getElementById('ev-end').value = endTime;
 
-            // تنظیم وضعیت تیک پیامک بر اساس اشتراک کاربر
             document.getElementById('ev-send-sms').checked = !!userSub.is_vip;
             refreshSubscriptionUI();
 
@@ -1929,7 +1938,7 @@ $initial_sub = function_exists('get_user_subscription_info')
         }
 
         // ====================================================
-        // مدیریت پوشه‌بندی، محدودیت‌های کاربر عادی و موتور PDFخوان
+        // مدیریت پوشه‌بندی، زوم دوانگشتی، حالت کاملاً فول‌صفحه و موتور PDFخوان
         // ====================================================
         let pdfFolders = [];
         let pdfList = [];
@@ -1940,6 +1949,9 @@ $initial_sub = function_exists('get_user_subscription_info')
         let currentPageNum = 1;
         let currentZoomMode = 'fit-width';
         let customScale = 1.0;
+        let fitWidthBaseScale = 1.0;
+        let unscaledPdfW = 600;
+        let unscaledPdfH = 800;
         let isRenderingPage = false;
         let pendingPageNum = null;
         let isPdfDarkMode = false;
@@ -2036,7 +2048,7 @@ $initial_sub = function_exists('get_user_subscription_info')
                         <div class="${isOpen ? 'block' : 'hidden'} p-2 space-y-2 border-t border-slate-200 bg-white">
                             ${items.length > 0
                                 ? items.map(renderSinglePdfCard).join('')
-                                : `<div class="text-[11px] text-slate-400 text-center py-3">این پوشه خالی است. روی <b>+ PDF</b> بزنید یا جزوات قبلی را با دکمه 📁 به اینجا منتقل کنید.</div>`
+                                : `<div class="text-[11px] text-slate-400 text-center py-3">این پوشه خالی است.</div>`
                             }
                         </div>
                     </div>
@@ -2135,7 +2147,7 @@ $initial_sub = function_exists('get_user_subscription_info')
                     alert(data.message || 'خطا در ساخت پوشه');
                 }
             } catch (err) {
-                alert('خطا در ارتباط با سرور هنگام ساخت پوشه.');
+                alert('خطا در ارتباط با سرور.');
             } finally {
                 btn.disabled = false;
                 btn.textContent = 'ساخت پوشه';
@@ -2188,7 +2200,6 @@ $initial_sub = function_exists('get_user_subscription_info')
             }
         }
 
-        // بررسی سهمیه کاربر عادی هنگام کلیک روی دکمه آپلود PDF
         function openUploadModal(defaultFolderId = '') {
             if (!userSub.is_vip && pdfList.length >= FREE_MAX_PDF_CNT) {
                 openSubscriptionModal(`شما کاربر عادی هستید و سهمیه ${FREE_MAX_PDF_CNT} فایل رایگان شما پر شده است. برای آپلود فایل جدید، لطفاً فایل قبلی را حذف کنید یا اشتراک ویژه تهیه نمایید.`);
@@ -2227,14 +2238,13 @@ $initial_sub = function_exists('get_user_subscription_info')
             const file = fileInput.files[0];
             if (!file) return;
 
-            // بررسی آنی حجم فایل در مرورگر قبل از ارسال به سرور
             const maxAllowedMB = userSub.is_vip ? VIP_MAX_PDF_MB : FREE_MAX_PDF_MB;
             const fileSizeMB   = +(file.size / (1024 * 1024)).toFixed(1);
 
             if (file.size > maxAllowedMB * 1024 * 1024) {
                 if (!userSub.is_vip) {
                     closeUploadModal();
-                    openSubscriptionModal(`حجم فایل انتخابی شما (${fileSizeMB} مگابایت) بیشتر از سقف مجاز کاربران عادی (${FREE_MAX_PDF_MB} مگابایت) است. با تهیه اشتراک ویژه، فایل‌های تا ${VIP_MAX_PDF_MB} مگابایت را بدون محدودیت آپلود کنید.`);
+                    openSubscriptionModal(`حجم فایل انتخابی شما (${fileSizeMB} مگابایت) بیشتر از سقف مجاز کاربران عادی (${FREE_MAX_PDF_MB} مگابایت) است.`);
                 } else {
                     alert(`حجم فایل (${fileSizeMB} مگابایت) بیش از سقف مجاز سرور (${VIP_MAX_PDF_MB} مگابایت) است.`);
                 }
@@ -2287,7 +2297,7 @@ $initial_sub = function_exists('get_user_subscription_info')
         }
 
         // ====================================================
-        // بارگذاری باینری و بدون خطای PDF (همراه با بررسی قفل اشتراک)
+        // بارگذاری باینری و بدون خطای PDF
         // ====================================================
         async function loadAndOpenPdf(pdfId, targetPage = null) {
             if (pdfList.length === 0) await fetchUserPdfs();
@@ -2295,7 +2305,7 @@ $initial_sub = function_exists('get_user_subscription_info')
             if (!targetItem) return;
 
             if (targetItem.is_locked) {
-                openSubscriptionModal(`جزوه «${targetItem.title}» به دلیل اتمام مهلت اشتراک ویژه قفل شده است. برای دسترسی مجدد به تمام جزوات و هایلایت‌های خود، اشتراک را تمدید نمایید (یا جزوات دیگر را حذف کنید تا فقط ۱ جزوه باقی بماند).`);
+                openSubscriptionModal(`جزوه «${targetItem.title}» به دلیل اتمام مهلت اشتراک ویژه قفل شده است. برای دسترسی مجدد به تمام جزوات و هایلایت‌های خود، اشتراک را تمدید نمایید.`);
                 return;
             }
 
@@ -2392,28 +2402,34 @@ $initial_sub = function_exists('get_user_subscription_info')
 
             try {
                 const page = await pdfDocInstance.getPage(num);
-                const container = document.getElementById('pdf-viewport-container');
-                const wrapper = document.getElementById('pdf-canvas-wrapper');
-                const canvas = document.getElementById('pdf-render-canvas');
+                const container   = document.getElementById('pdf-viewport-container');
+                const wrapper     = document.getElementById('pdf-canvas-wrapper');
+                const canvas      = document.getElementById('pdf-render-canvas');
                 const annotCanvas = document.getElementById('pdf-annot-canvas');
-                const ctx = canvas.getContext('2d');
+                const ctx         = canvas.getContext('2d');
 
                 wrapper.classList.remove('page-flip-anim');
                 void wrapper.offsetWidth;
                 wrapper.classList.add('page-flip-anim');
 
                 const unscaledViewport = page.getViewport({ scale: 1 });
+                unscaledPdfW = unscaledViewport.width;
+                unscaledPdfH = unscaledViewport.height;
+
+                const pad = isReaderFullScreen ? 0 : (window.innerWidth < 640 ? 4 : 24);
+                const availableWidth = Math.max(260, container.clientWidth - pad);
+                fitWidthBaseScale = isReaderFullScreen
+                    ? (availableWidth / unscaledPdfW)
+                    : Math.min(availableWidth / unscaledPdfW, 1.95);
+
                 let scale = customScale;
                 if (currentZoomMode === 'fit-width') {
-                    const pad = window.innerWidth < 640 ? 6 : 24;
-                    const availableWidth = Math.max(280, container.clientWidth - pad);
-                    scale = Math.min(availableWidth / unscaledViewport.width, 1.85);
+                    scale = fitWidthBaseScale;
                     customScale = scale;
                 }
 
                 const viewport = page.getViewport({ scale: scale });
-
-                const maxSafeDpr = window.innerWidth < 768 ? 1.75 : 2.0;
+                const maxSafeDpr = window.innerWidth < 768 ? 1.85 : 2.0;
                 let outputScale = Math.min(window.devicePixelRatio || 1, maxSafeDpr);
 
                 const maxCanvasDim = 3800;
@@ -2421,15 +2437,15 @@ $initial_sub = function_exists('get_user_subscription_info')
                     outputScale = Math.min(maxCanvasDim / viewport.width, maxCanvasDim / viewport.height);
                 }
 
-                canvas.width  = Math.floor(viewport.width * outputScale);
-                canvas.height = Math.floor(viewport.height * outputScale);
-                canvas.style.width  = Math.floor(viewport.width) + "px";
-                canvas.style.height = Math.floor(viewport.height) + "px";
+                const cssWidth  = Math.round(viewport.width);
+                const cssHeight = Math.round(viewport.height);
 
-                annotCanvas.width  = Math.floor(viewport.width);
-                annotCanvas.height = Math.floor(viewport.height);
-                annotCanvas.style.width  = Math.floor(viewport.width) + "px";
-                annotCanvas.style.height = Math.floor(viewport.height) + "px";
+                wrapper.style.width       = cssWidth + "px";
+                wrapper.style.height      = cssHeight + "px";
+                canvas.width              = Math.floor(cssWidth * outputScale);
+                canvas.height             = Math.floor(cssHeight * outputScale);
+                annotCanvas.width         = cssWidth;
+                annotCanvas.height        = cssHeight;
 
                 ctx.save();
                 ctx.fillStyle = '#ffffff';
@@ -2459,7 +2475,7 @@ $initial_sub = function_exists('get_user_subscription_info')
                 if (pendingPageNum !== null) {
                     const next = pendingPageNum;
                     pendingPageNum = null;
-                    renderPdfPage(next);
+                    await renderPdfPage(next);
                 }
             }
         }
@@ -2517,31 +2533,158 @@ $initial_sub = function_exists('get_user_subscription_info')
             m.classList.remove('flex');
         }
 
-        let touchSwipeStartX = 0;
-        let touchSwipeStartY = 0;
-        const pdfViewportEl = document.getElementById('pdf-viewport-container');
+        // ====================================================
+        // ژست لمسی زوم دو انگشتی قفل‌شده روی نقطه بین دو انگشت + وسط‌چین هوشمند
+        // ====================================================
+        let isPinchingPdf = false;
+        (function initPdfTouchGestures() {
+            const pdfViewportEl = document.getElementById('pdf-viewport-container');
+            const wrapperEl     = document.getElementById('pdf-canvas-wrapper');
 
-        pdfViewportEl.addEventListener('touchstart', (e) => {
-            if (currentTool !== 'pan' || e.touches.length !== 1) return;
-            touchSwipeStartX = e.touches[0].clientX;
-            touchSwipeStartY = e.touches[0].clientY;
-        }, { passive: true });
+            let startDist  = 0;
+            let startScale = 1.0;
+            let liveScale  = 1.0;
+            // مختصات نسبی نقطه بین دو انگشت روی خود برگه PDF (از 0.0 تا 1.0)
+            let pinchRelX  = 0.5;
+            let pinchRelY  = 0.5;
+            // مکان انگشتان نسبت به کادر دید گوشی
+            let pinchVpX   = 0;
+            let pinchVpY   = 0;
+            let reRenderTimer = null;
 
-        pdfViewportEl.addEventListener('touchend', (e) => {
-            if (currentTool !== 'pan' || !pdfDocInstance || e.changedTouches.length !== 1) return;
-            if (pdfViewportEl.scrollWidth > pdfViewportEl.clientWidth + 15) return;
+            let touchSwipeStartX = 0;
+            let touchSwipeStartY = 0;
+            let lastTapTime = 0;
+            let lastTapX = 0;
+            let lastTapY = 0;
 
-            const dx = e.changedTouches[0].clientX - touchSwipeStartX;
-            const dy = e.changedTouches[0].clientY - touchSwipeStartY;
+            pdfViewportEl.addEventListener('touchstart', (e) => {
+                if (!pdfDocInstance) return;
 
-            if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) {
-                if (dx > 0) {
-                    changePdfPage(1);
-                } else {
-                    changePdfPage(-1);
+                if (e.touches.length === 2) {
+                    isPinchingPdf = true;
+                    if (isDrawingAnnot) {
+                        isDrawingAnnot = false;
+                        currentStroke = null;
+                        redrawAllAnnotations();
+                    }
+                    if (reRenderTimer) clearTimeout(reRenderTimer);
+
+                    const t1 = e.touches[0];
+                    const t2 = e.touches[1];
+                    const midClientX = (t1.clientX + t2.clientX) / 2;
+                    const midClientY = (t1.clientY + t2.clientY) / 2;
+
+                    startDist  = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+                    startScale = customScale;
+                    liveScale  = customScale;
+
+                    const vpRect   = pdfViewportEl.getBoundingClientRect();
+                    const wrapRect = wrapperEl.getBoundingClientRect();
+
+                    pinchVpX = midClientX - vpRect.left;
+                    pinchVpY = midClientY - vpRect.top;
+
+                    // پیدا کردن نقطه دقیق روی برگه جزوه که زیر دو انگشت قرار دارد
+                    pinchRelX = Math.min(1, Math.max(0, (midClientX - wrapRect.left) / Math.max(1, wrapRect.width)));
+                    pinchRelY = Math.min(1, Math.max(0, (midClientY - wrapRect.top) / Math.max(1, wrapRect.height)));
+                } else if (e.touches.length === 1 && !isPinchingPdf && currentTool === 'pan') {
+                    touchSwipeStartX = e.touches[0].clientX;
+                    touchSwipeStartY = e.touches[0].clientY;
+
+                    // زوم سریع با دو بار ضربه انگشت (Double-Tap) دقیقاً روی نقطه ضربه‌زده‌شده
+                    const now = Date.now();
+                    if (now - lastTapTime < 280 && Math.hypot(touchSwipeStartX - lastTapX, touchSwipeStartY - lastTapY) < 28) {
+                        e.preventDefault();
+                        const wrapRect = wrapperEl.getBoundingClientRect();
+                        const tapRelX  = Math.min(1, Math.max(0, (touchSwipeStartX - wrapRect.left) / Math.max(1, wrapRect.width)));
+                        const tapRelY  = Math.min(1, Math.max(0, (touchSwipeStartY - wrapRect.top) / Math.max(1, wrapRect.height)));
+
+                        if (currentZoomMode === 'fit-width' || customScale <= fitWidthBaseScale * 1.15) {
+                            currentZoomMode = 'custom';
+                            customScale = Math.min(3.2, fitWidthBaseScale * 1.85);
+                            renderPdfPage(currentPageNum).then(() => {
+                                const newW = wrapperEl.offsetWidth;
+                                const newH = wrapperEl.offsetHeight;
+                                pdfViewportEl.scrollTo({
+                                    left: Math.max(0, wrapperEl.offsetLeft + (tapRelX * newW) - (pdfViewportEl.clientWidth / 2)),
+                                    top:  Math.max(0, wrapperEl.offsetTop + (tapRelY * newH) - (pdfViewportEl.clientHeight / 2)),
+                                    behavior: 'smooth'
+                                });
+                            });
+                        } else {
+                            setFitWidthZoom();
+                        }
+                        lastTapTime = 0;
+                    } else {
+                        lastTapTime = now;
+                        lastTapX = touchSwipeStartX;
+                        lastTapY = touchSwipeStartY;
+                    }
                 }
-            }
-        }, { passive: true });
+            }, { passive: false });
+
+            pdfViewportEl.addEventListener('touchmove', (e) => {
+                if (!isPinchingPdf || e.touches.length !== 2 || !pdfDocInstance) return;
+                e.preventDefault();
+
+                const t1 = e.touches[0];
+                const t2 = e.touches[1];
+                const curDist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+                if (startDist < 10) return;
+
+                const midClientX = (t1.clientX + t2.clientX) / 2;
+                const midClientY = (t1.clientY + t2.clientY) / 2;
+                const vpRect     = pdfViewportEl.getBoundingClientRect();
+                pinchVpX = midClientX - vpRect.left;
+                pinchVpY = midClientY - vpRect.top;
+
+                const ratio = curDist / startDist;
+                liveScale = Math.min(3.5, Math.max(0.45, startScale * ratio));
+
+                const newW = Math.round(unscaledPdfW * liveScale);
+                const newH = Math.round(unscaledPdfH * liveScale);
+                wrapperEl.style.width  = newW + 'px';
+                wrapperEl.style.height = newH + 'px';
+
+                // نگه داشتن نقطه دقیق جزوه در زیر انگشتان در حین باز و بسته کردن دست
+                pdfViewportEl.scrollLeft = Math.max(0, wrapperEl.offsetLeft + (pinchRelX * newW) - pinchVpX);
+                pdfViewportEl.scrollTop  = Math.max(0, wrapperEl.offsetTop + (pinchRelY * newH) - pinchVpY);
+            }, { passive: false });
+
+            pdfViewportEl.addEventListener('touchend', (e) => {
+                if (isPinchingPdf) {
+                    if (e.touches.length < 2) {
+                        isPinchingPdf = false;
+                        if (Math.abs(liveScale - customScale) > 0.04) {
+                            currentZoomMode = 'custom';
+                            customScale     = liveScale;
+                            const savedScrollLeft = pdfViewportEl.scrollLeft;
+                            const savedScrollTop  = pdfViewportEl.scrollTop;
+
+                            if (reRenderTimer) clearTimeout(reRenderTimer);
+                            reRenderTimer = setTimeout(() => {
+                                renderPdfPage(currentPageNum).then(() => {
+                                    pdfViewportEl.scrollLeft = savedScrollLeft;
+                                    pdfViewportEl.scrollTop  = savedScrollTop;
+                                });
+                            }, 180);
+                        }
+                    }
+                    return;
+                }
+
+                if (currentTool === 'pan' && pdfDocInstance && e.changedTouches.length === 1) {
+                    if (pdfViewportEl.scrollWidth > pdfViewportEl.clientWidth + 15) return;
+                    const dx = e.changedTouches[0].clientX - touchSwipeStartX;
+                    const dy = e.changedTouches[0].clientY - touchSwipeStartY;
+                    if (Math.abs(dx) > 65 && Math.abs(dx) > Math.abs(dy) * 1.6) {
+                        if (dx > 0) changePdfPage(1);
+                        else changePdfPage(-1);
+                    }
+                }
+            }, { passive: true });
+        })();
 
         function changePdfPage(delta) {
             if (!pdfDocInstance) return;
@@ -2549,7 +2692,7 @@ $initial_sub = function_exists('get_user_subscription_info')
             if (next >= 1 && next <= pdfDocInstance.numPages) {
                 currentPageNum = next;
                 renderPdfPage(currentPageNum);
-                pdfViewportEl.scrollTop = 0;
+                document.getElementById('pdf-viewport-container').scrollTop = 0;
             }
         }
 
@@ -2557,13 +2700,13 @@ $initial_sub = function_exists('get_user_subscription_info')
             if (!pdfDocInstance) return;
             currentPageNum = Math.min(pdfDocInstance.numPages, Math.max(1, parseInt(val) || 1));
             renderPdfPage(currentPageNum);
-            pdfViewportEl.scrollTop = 0;
+            document.getElementById('pdf-viewport-container').scrollTop = 0;
         }
 
         function adjustZoom(delta) {
             if (!pdfDocInstance) return;
             currentZoomMode = 'custom';
-            customScale = Math.min(3.0, Math.max(0.5, customScale + delta));
+            customScale = Math.min(3.5, Math.max(0.45, customScale + delta));
             renderPdfPage(currentPageNum);
         }
 
@@ -2586,21 +2729,46 @@ $initial_sub = function_exists('get_user_subscription_info')
             }
         }
 
+        // ====================================================
+        // حالت «کاملاً فول‌صفحه لب‌به‌لب» (Edge-to-Edge Fullscreen) با حفظ وسط‌چین شدن عمودی
+        // ====================================================
         function toggleFullScreenReader() {
             isReaderFullScreen = !isReaderFullScreen;
-            const header = document.getElementById('main-app-header');
-            const btn = document.getElementById('btn-fullscreen-reader');
+            const mainHeader = document.getElementById('main-app-header');
+            const pdfTopBar  = document.getElementById('pdf-top-bar');
+            const pdfSidebar = document.getElementById('pdf-sidebar');
+            const viewport   = document.getElementById('pdf-viewport-container');
+            const exitBtn    = document.getElementById('floating-exit-fullscreen-btn');
+
             if (isReaderFullScreen) {
-                header.classList.add('hidden');
-                btn.textContent = '✕ خروج تمام‌صفحه';
-                btn.className = 'px-2 py-1 bg-rose-600 text-white rounded-lg text-xs font-bold shrink-0';
+                mainHeader.classList.add('hidden');
+                pdfTopBar.classList.add('hidden');
+                pdfSidebar.classList.add('hidden');
+                viewport.classList.remove('py-6', 'px-1', 'sm:p-4');
+                viewport.classList.add('py-4', 'px-0');
+                exitBtn.classList.remove('hidden');
+                exitBtn.classList.add('flex');
+
+                if (document.documentElement.requestFullscreen) {
+                    document.documentElement.requestFullscreen().catch(() => {});
+                }
             } else {
-                header.classList.remove('hidden');
-                btn.textContent = '⛶ تمام‌صفحه';
-                btn.className = 'px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-bold shrink-0';
+                mainHeader.classList.remove('hidden');
+                pdfTopBar.classList.remove('hidden');
+                pdfSidebar.classList.remove('hidden');
+                viewport.classList.remove('py-4', 'px-0');
+                viewport.classList.add('py-6', 'px-1', 'sm:p-4');
+                exitBtn.classList.add('hidden');
+                exitBtn.classList.remove('flex');
+
+                if (document.fullscreenElement && document.exitFullscreen) {
+                    document.exitFullscreen().catch(() => {});
+                }
             }
-            if (pdfDocInstance && currentZoomMode === 'fit-width') {
-                setTimeout(() => renderPdfPage(currentPageNum), 50);
+
+            currentZoomMode = 'fit-width';
+            if (pdfDocInstance) {
+                setTimeout(() => renderPdfPage(currentPageNum), 80);
             }
         }
 
@@ -2660,6 +2828,7 @@ $initial_sub = function_exists('get_user_subscription_info')
             const navPdf = document.getElementById('nav-pdf');
 
             if (sec === 'calendar') {
+                if (isReaderFullScreen) toggleFullScreenReader();
                 calSec.classList.remove('hidden');
                 pdfSec.classList.add('hidden');
                 navCal.className = 'px-2.5 md:px-3.5 py-1.5 rounded-lg text-xs font-bold bg-indigo-600 text-white transition';
@@ -2676,10 +2845,11 @@ $initial_sub = function_exists('get_user_subscription_info')
         }
 
         // ====================================================
-        // موتور علامت‌گذاری روی PDF
+        // موتور پیشرفته حاشیه‌نویسی روی PDF (قلم ۱۰۰٪ مات، خط‌کش، کادر فرمول، ضخامت و عکس صفحه)
         // ====================================================
         let currentTool = 'pan';
         let currentColor = '#facc15';
+        let currentSizeFactor = 2; // 1=ظریف, 2=معمولی, 3=ضخیم, 4=خیلی ضخیم
         let pageAnnotations = [];
         let isDrawingAnnot = false;
         let currentStroke = null;
@@ -2687,11 +2857,17 @@ $initial_sub = function_exists('get_user_subscription_info')
 
         const annotCanvas = document.getElementById('pdf-annot-canvas');
         const annotCtx = annotCanvas.getContext('2d');
-        const TOOL_ICONS = { pan: '✋', highlight: '🖍️', pen: '✏️', note: '📌', eraser: '🧽' };
+        const TOOL_ICONS = { pan: '✋', pen: '✏️', highlight: '🖍️', line: '📏', rect: '⬜', note: '📌', eraser: '🧽' };
 
         function setAnnotTool(tool, autoCloseOnMobile = false) {
             currentTool = tool;
             document.getElementById('fab-active-icon').textContent = TOOL_ICONS[tool] || '✋';
+
+            if (tool === 'pen' && currentColor === '#facc15') {
+                setAnnotColor('#1d4ed8');
+            } else if (tool === 'highlight' && (currentColor === '#0f172a' || currentColor === '#1d4ed8' || currentColor === '#ffffff')) {
+                setAnnotColor('#facc15');
+            }
 
             document.querySelectorAll('.annot-tool-btn').forEach(btn => {
                 btn.classList.remove('bg-indigo-600', 'text-white');
@@ -2718,23 +2894,58 @@ $initial_sub = function_exists('get_user_subscription_info')
 
         function setAnnotColor(color) {
             currentColor = color;
+            const fabDot = document.getElementById('fab-color-dot');
+            if (fabDot) fabDot.style.backgroundColor = color;
+
             document.querySelectorAll('.annot-color-btn').forEach(btn => {
-                btn.className = (btn.dataset.color === color)
-                    ? 'annot-color-btn w-6 h-6 rounded-full ring-2 ring-white scale-110 transition'
-                    : 'annot-color-btn w-6 h-6 rounded-full opacity-60 hover:opacity-100 transition';
+                const isSelected = (String(btn.dataset.color).toLowerCase() === String(color).toLowerCase());
+                btn.className = isSelected
+                    ? 'annot-color-btn w-6 h-6 rounded-full ring-2 ring-white scale-115 transition'
+                    : 'annot-color-btn w-6 h-6 rounded-full opacity-70 hover:opacity-100 transition';
                 btn.style.backgroundColor = btn.dataset.color;
+                if (btn.dataset.color === '#ffffff') {
+                    btn.style.border = '2px solid #94a3b8';
+                }
+            });
+        }
+
+        function setAnnotSize(sizeLevel) {
+            currentSizeFactor = sizeLevel;
+            [1, 2, 3, 4].forEach(s => {
+                const btn = document.getElementById('size-btn-' + s);
+                if (btn) {
+                    btn.className = (s === sizeLevel)
+                        ? 'annot-size-btn px-2 py-1 rounded-lg text-[10px] font-extrabold bg-indigo-600 text-white'
+                        : 'annot-size-btn px-2 py-1 rounded-lg text-[10px] font-bold bg-slate-700 text-slate-300';
+                }
             });
         }
 
         function getNormalizedPointerPos(e) {
             const rect = annotCanvas.getBoundingClientRect();
-            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+            const clientX = (e.touches && e.touches.length > 0) ? e.touches[0].clientX : e.clientX;
+            const clientY = (e.touches && e.touches.length > 0) ? e.touches[0].clientY : e.clientY;
             return {
                 x: Math.min(1, Math.max(0, (clientX - rect.left) / rect.width)),
                 y: Math.min(1, Math.max(0, (clientY - rect.top) / rect.height))
             };
         }
+
+        document.getElementById('pdf-canvas-wrapper').addEventListener('click', (e) => {
+            if (currentTool !== 'pan' || !activePdfMeta || pageAnnotations.length === 0) return;
+            const rect = annotCanvas.getBoundingClientRect();
+            const nx = (e.clientX - rect.left) / rect.width;
+            const ny = (e.clientY - rect.top) / rect.height;
+            const noteIdx = findAnnotationAtPos(nx, ny, 'note');
+            if (noteIdx !== -1) {
+                const updated = prompt('📌 متن یادداشت شما (برای حذف، متن را خالی کرده و OK بزنید):', pageAnnotations[noteIdx].text);
+                if (updated === null) return;
+                if (updated.trim() === '') pageAnnotations.splice(noteIdx, 1);
+                else pageAnnotations[noteIdx].text = updated.trim();
+                redrawAllAnnotations();
+                triggerAutoSaveAnnotations();
+            }
+        });
 
         async function loadPageAnnotations(pdfId, pageNum) {
             try {
@@ -2755,29 +2966,56 @@ $initial_sub = function_exists('get_user_subscription_info')
             if (currentStroke) drawSingleAnnotation(currentStroke, w, h);
         }
 
+        function computeStrokeLineWidth(type, sizeLevel, canvasW) {
+            const lvl = Number(sizeLevel || 2);
+            if (type === 'highlight') {
+                const mults = { 1: 0.015, 2: 0.024, 3: 0.036, 4: 0.052 };
+                return Math.max(10, canvasW * (mults[lvl] || 0.024));
+            } else {
+                const mults = { 1: 0.0018, 2: 0.0034, 3: 0.0065, 4: 0.014 };
+                return Math.max(1.5, canvasW * (mults[lvl] || 0.0034));
+            }
+        }
+
         function drawSingleAnnotation(item, w, h) {
             annotCtx.save();
             annotCtx.direction = 'ltr';
+
+            const strokeW = computeStrokeLineWidth(item.type, item.size || 2, w);
+            annotCtx.strokeStyle = item.color || '#facc15';
+            annotCtx.lineWidth   = strokeW;
+            annotCtx.lineCap     = 'round';
+            annotCtx.lineJoin    = 'round';
+
+            annotCtx.globalAlpha = (item.type === 'highlight') ? 0.36 : 1.0;
+
             if (item.type === 'highlight' || item.type === 'pen') {
                 if (!item.points || item.points.length === 0) { annotCtx.restore(); return; }
                 annotCtx.beginPath();
-                annotCtx.lineCap = 'round';
-                annotCtx.lineJoin = 'round';
-                annotCtx.strokeStyle = item.color || '#facc15';
-                annotCtx.globalAlpha = (item.type === 'highlight') ? 0.38 : 0.95;
-                annotCtx.lineWidth = (item.type === 'highlight') ? Math.max(14, w * 0.024) : Math.max(2, w * 0.0032);
-
                 annotCtx.moveTo(item.points[0].x * w, item.points[0].y * h);
                 for (let i = 1; i < item.points.length; i++) {
                     annotCtx.lineTo(item.points[i].x * w, item.points[i].y * h);
                 }
                 annotCtx.stroke();
+            } else if (item.type === 'line') {
+                if (!item.points || item.points.length < 2) { annotCtx.restore(); return; }
+                annotCtx.beginPath();
+                annotCtx.moveTo(item.points[0].x * w, item.points[0].y * h);
+                annotCtx.lineTo(item.points[1].x * w, item.points[1].y * h);
+                annotCtx.stroke();
+            } else if (item.type === 'rect') {
+                if (!item.points || item.points.length < 2) { annotCtx.restore(); return; }
+                const x1 = item.points[0].x * w;
+                const y1 = item.points[0].y * h;
+                const x2 = item.points[1].x * w;
+                const y2 = item.points[1].y * h;
+                annotCtx.strokeRect(Math.min(x1, x2), Math.min(y1, y2), Math.abs(x2 - x1), Math.abs(y2 - y1));
             } else if (item.type === 'note') {
                 const nx = item.x * w;
                 const ny = item.y * h;
                 const boxSize = Math.max(22, w * 0.032);
                 annotCtx.fillStyle = item.color || '#facc15';
-                annotCtx.strokeStyle = '#1e293b';
+                annotCtx.strokeStyle = '#0f172a';
                 annotCtx.lineWidth = 1.5;
                 annotCtx.fillRect(nx - boxSize / 2, ny - boxSize / 2, boxSize, boxSize);
                 annotCtx.strokeRect(nx - boxSize / 2, ny - boxSize / 2, boxSize, boxSize);
@@ -2790,7 +3028,13 @@ $initial_sub = function_exists('get_user_subscription_info')
         }
 
         function handlePointerStart(e) {
-            if (currentTool === 'pan' || !activePdfMeta) return;
+            if (currentTool === 'pan' || !activePdfMeta || isPinchingPdf) return;
+            if (e.touches && e.touches.length > 1) {
+                isDrawingAnnot = false;
+                currentStroke = null;
+                redrawAllAnnotations();
+                return;
+            }
             if (e.cancelable) e.preventDefault();
             const pos = getNormalizedPointerPos(e);
 
@@ -2805,7 +3049,7 @@ $initial_sub = function_exists('get_user_subscription_info')
                     triggerAutoSaveAnnotations();
                     return;
                 }
-                const text = prompt('متن نکته یا یادداشت خود را وارد کنید:');
+                const text = prompt('متن نکته یا فرمول خود را وارد کنید:');
                 if (text && text.trim() !== '') {
                     pageAnnotations.push({ type: 'note', color: currentColor, x: pos.x, y: pos.y, text: text.trim() });
                     redrawAllAnnotations();
@@ -2822,17 +3066,39 @@ $initial_sub = function_exists('get_user_subscription_info')
 
             if (currentTool === 'highlight' || currentTool === 'pen') {
                 isDrawingAnnot = true;
-                currentStroke = { type: currentTool, color: currentColor, points: [pos] };
+                currentStroke = { type: currentTool, color: currentColor, size: currentSizeFactor, points: [pos] };
+                redrawAllAnnotations();
+            } else if (currentTool === 'line' || currentTool === 'rect') {
+                isDrawingAnnot = true;
+                currentStroke = { type: currentTool, color: currentColor, size: currentSizeFactor, points: [pos, pos] };
                 redrawAllAnnotations();
             }
         }
 
         function handlePointerMove(e) {
-            if (!isDrawingAnnot || currentTool === 'pan') return;
+            if (!isDrawingAnnot || currentTool === 'pan' || isPinchingPdf) return;
+            if (e.touches && e.touches.length > 1) {
+                isDrawingAnnot = false;
+                currentStroke = null;
+                redrawAllAnnotations();
+                return;
+            }
             if (e.cancelable) e.preventDefault();
             const pos = getNormalizedPointerPos(e);
-            if (currentTool === 'eraser') { eraseAnnotationNear(pos.x, pos.y); return; }
-            if (currentStroke) { currentStroke.points.push(pos); redrawAllAnnotations(); }
+
+            if (currentTool === 'eraser') {
+                eraseAnnotationNear(pos.x, pos.y);
+                return;
+            }
+
+            if (currentStroke) {
+                if (currentStroke.type === 'line' || currentStroke.type === 'rect') {
+                    currentStroke.points[1] = pos;
+                } else {
+                    currentStroke.points.push(pos);
+                }
+                redrawAllAnnotations();
+            }
         }
 
         function handlePointerEnd() {
@@ -2846,12 +3112,31 @@ $initial_sub = function_exists('get_user_subscription_info')
             }
         }
 
+        function distToSegment(px, py, x1, y1, x2, y2) {
+            const l2 = (x2 - x1) ** 2 + (y2 - y1) ** 2;
+            if (l2 === 0) return Math.hypot(px - x1, py - y1);
+            let t = ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / l2;
+            t = Math.max(0, Math.min(1, t));
+            return Math.hypot(px - (x1 + t * (x2 - x1)), py - (y1 + t * (y2 - y1)));
+        }
+
         function findAnnotationAtPos(x, y, filterType = null) {
-            const threshold = 0.035;
+            const threshold = 0.032;
             for (let i = pageAnnotations.length - 1; i >= 0; i--) {
                 const item = pageAnnotations[i];
                 if (filterType && item.type !== filterType) continue;
                 if (item.type === 'note' && Math.hypot(item.x - x, item.y - y) <= threshold) return i;
+                if (item.type === 'line' && item.points && item.points.length >= 2) {
+                    if (distToSegment(x, y, item.points[0].x, item.points[0].y, item.points[1].x, item.points[1].y) <= threshold) return i;
+                }
+                if (item.type === 'rect' && item.points && item.points.length >= 2) {
+                    const x1 = item.points[0].x, y1 = item.points[0].y;
+                    const x2 = item.points[1].x, y2 = item.points[1].y;
+                    if (distToSegment(x, y, x1, y1, x2, y1) <= threshold ||
+                        distToSegment(x, y, x2, y1, x2, y2) <= threshold ||
+                        distToSegment(x, y, x2, y2, x1, y2) <= threshold ||
+                        distToSegment(x, y, x1, y2, x1, y1) <= threshold) return i;
+                }
                 if (item.points && item.points.some(pt => Math.hypot(pt.x - x, pt.y - y) <= threshold)) return i;
             }
             return -1;
@@ -2878,6 +3163,26 @@ $initial_sub = function_exists('get_user_subscription_info')
             pageAnnotations = [];
             redrawAllAnnotations();
             triggerAutoSaveAnnotations();
+        }
+
+        function downloadAnnotatedPageImage() {
+            if (!pdfDocInstance || !activePdfMeta) return;
+            const pdfCanvas = document.getElementById('pdf-render-canvas');
+            const outCanvas = document.createElement('canvas');
+            outCanvas.width  = pdfCanvas.width;
+            outCanvas.height = pdfCanvas.height;
+            const outCtx = outCanvas.getContext('2d');
+
+            outCtx.drawImage(pdfCanvas, 0, 0);
+            outCtx.drawImage(annotCanvas, 0, 0, outCanvas.width, outCanvas.height);
+
+            const link = document.createElement('a');
+            const safeTitle = activePdfMeta.title.replace(/[^a-zA-Z0-9آ-ی_\-]/g, '_');
+            link.download = `${safeTitle}_Page_${currentPageNum}.png`;
+            link.href = outCanvas.toDataURL('image/png');
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
         }
 
         function triggerAutoSaveAnnotations() {
@@ -2988,9 +3293,6 @@ $initial_sub = function_exists('get_user_subscription_info')
             } catch (e) {}
         }
 
-        // ====================================================
-        // مدیریت شماره موبایل و پیامک یادآوری sms.ir
-        // ====================================================
         function openPhoneModal() {
             refreshSubscriptionUI();
             const m = document.getElementById('phone-modal');
@@ -3045,6 +3347,10 @@ $initial_sub = function_exists('get_user_subscription_info')
             renderCalendar();
             fetchUserPdfs();
             document.getElementById('calendar-scroll-area').scrollTop = 7 * 60;
+
+            if (new URLSearchParams(window.location.search).get('tab') === 'pdf') {
+                switchMainSection('pdf');
+            }
 
             triggerSmsCheckNow(false);
             setInterval(() => triggerSmsCheckNow(false), 180000);

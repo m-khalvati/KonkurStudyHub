@@ -1,12 +1,13 @@
 # Sensitive Configuration (API Keys & DB Credentials)
 config.php
 
-# User Uploaded Files (Keep folder structure, ignore user files)
+# User & Admin Uploaded Files (Keep folder structure, ignore uploaded binaries)
 uploads/*
 !uploads/.gitkeep
 uploads/pdfs/*
 uploads/papers/*
 uploads/exams/*
+uploads/courses/*
 
 # System & IDE Files
 .DS_Store

@@ -228,6 +228,9 @@ $initial_sub = function_exists('get_user_subscription_info')
                 <a href="exam.php" class="px-2.5 md:px-3.5 py-1.5 rounded-lg text-xs font-bold text-rose-300 hover:text-white transition">
                     📝 آزمون‌ها
                 </a>
+                <a href="courses.php" class="px-2.5 md:px-3.5 py-1.5 rounded-lg text-xs font-bold text-amber-300 hover:text-white transition">
+                    🎬 ویدیوها
+                </a>
             </nav>
         </div>
 

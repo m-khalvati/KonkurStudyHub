@@ -97,6 +97,9 @@ $initial_sub = function_exists('get_user_subscription_info')
                 <span class="px-2.5 md:px-3.5 py-1.5 rounded-lg text-xs font-bold bg-indigo-600 text-white shadow-xs">
                     📝 آزمون‌ها
                 </span>
+                <a href="courses.php" class="px-2.5 md:px-3.5 py-1.5 rounded-lg text-xs font-bold text-amber-300 hover:text-white transition">
+                    🎬 ویدیوها
+                </a>
             </nav>
         </div>
 

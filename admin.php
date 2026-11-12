@@ -137,19 +137,22 @@ try {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>پنل مدیریت کل و استودیو آزمون‌ساز هوشمند v4.3</title>
+    <title>پنل مدیریت کل: آزمون‌ساز، دوره‌های ویدیویی و کاربران v4.4</title>
 
-    <!-- ۱. بارگذاری فایل CSS پایه از سرور بدون اختلال jsDelivr (تضمین ۱۰۰٪ لود شدن استایل حتی در صورت مسدود بودن دامنه tailwindcss.com) -->
+    <!-- ۱. بارگذاری اولویت اول از پوشه بومی هاست (assets) برای کارکرد ۱۰۰٪ آفلاین و ضدقطعی -->
+    <link href="assets/css/tailwind-local.css" rel="stylesheet">
+    <link href="assets/css/vazirmatn-local.css" rel="stylesheet">
+
+    <!-- ۲. پشتیبان jsDelivr و Tailwind در صورت عدم اجرای setup_assets -->
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
-    <!-- ۲. بارگذاری موتور JIT در صورت در دسترس بودن -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- ۳. فونت وزیرمتن -->
     <link href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css" rel="stylesheet">
-    <!-- ۴. موتور PDF.js از jsDelivr و پشتیبان unpkg -->
-    <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"
-            onerror="this.onerror=null;this.src='https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.min.js';"></script>
 
-    <!-- ۵. استایل‌های داخلی کامل (Built-in Fallback CSS) برای تضمین ظاهر عالی در تمام شبکه‌ها -->
+    <!-- ۳. بارگذاری موتور PDF.js از پوشه بومی هاست به همراه پشتیبان CDN -->
+    <script src="assets/pdfjs/pdf.min.js"
+            onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js';"></script>
+
+    <!-- ۴. استایل‌های داخلی تضمین‌کننده ظاهر پنل در تمامی شرایط شبکه -->
     <style>
         *, *::before, *::after { box-sizing: border-box; }
         body {
@@ -161,7 +164,6 @@ try {
         .custom-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
         .custom-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
 
-        /* کلاس‌های تکمیلی Tailwind v3 برای زمانی که فقط فایل پایه jsDelivr لود شود */
         .bg-slate-50 { background-color: #f8fafc !important; }
         .bg-slate-100 { background-color: #f1f5f9 !important; }
         .bg-slate-200 { background-color: #e2e8f0 !important; }
@@ -198,7 +200,6 @@ try {
         .text-indigo-950 { color: #1e1b4b !important; }
         .border-indigo-200 { border-color: #c7d2fe !important; }
         .border-indigo-500 { border-color: #6366f1 !important; }
-        .border-indigo-800 { border-color: #3730a3 !important; }
 
         .bg-emerald-50 { background-color: #ecfdf5 !important; }
         .bg-emerald-100 { background-color: #d1fae5 !important; }
@@ -212,13 +213,11 @@ try {
         .text-emerald-900 { color: #064e3b !important; }
         .text-emerald-950 { color: #022c22 !important; }
         .border-emerald-200 { border-color: #a7f3d0 !important; }
-        .border-emerald-400 { border-color: #34d399 !important; }
 
         .bg-amber-50 { background-color: #fffbeb !important; }
         .bg-amber-100 { background-color: #fef3c7 !important; }
         .bg-amber-400 { background-color: #fbbf24 !important; }
         .bg-amber-500 { background-color: #f59e0b !important; }
-        .text-amber-200 { color: #fde68a !important; }
         .text-amber-300 { color: #fcd34d !important; }
         .text-amber-600 { color: #d97706 !important; }
         .text-amber-700 { color: #b45309 !important; }
@@ -248,15 +247,6 @@ try {
         .max-h-\[520px\] { max-height: 520px !important; }
         .max-h-\[580px\] { max-height: 580px !important; }
         .max-h-\[560px\] { max-height: 560px !important; }
-        .gap-1\.5 { gap: 0.375rem !important; }
-        .gap-2\.5 { gap: 0.625rem !important; }
-        .gap-3\.5 { gap: 0.875rem !important; }
-        .p-2\.5 { padding: 0.625rem !important; }
-        .p-3\.5 { padding: 0.875rem !important; }
-        .px-2\.5 { padding-left: 0.625rem !important; padding-right: 0.625rem !important; }
-        .px-3\.5 { padding-left: 0.875rem !important; padding-right: 0.875rem !important; }
-        .py-1\.5 { padding-top: 0.375rem !important; padding-bottom: 0.375rem !important; }
-        .py-2\.5 { padding-top: 0.625rem !important; padding-bottom: 0.625rem !important; }
 
         @media (min-width: 1024px) {
             .lg\:grid-cols-12 { grid-template-columns: repeat(12, minmax(0, 1fr)) !important; }
@@ -301,34 +291,41 @@ try {
 <body class="bg-slate-100 text-slate-800 min-h-screen flex flex-col">
 
     <!-- ==================================================== -->
-    <!-- ۱. هدر پنل مدیریت با ۳ تب: آزمون‌ساز هوشمند | مانیتورینگ کلیدهای AI | کاربران و اشتراک‌ها -->
+    <!-- ۱. هدر پنل مدیریت با ۴ تب: آزمون‌ساز | دوره‌های ویدیویی | کلیدهای AI | کاربران -->
     <!-- ==================================================== -->
     <header class="bg-slate-900 text-white px-4 py-2.5 flex flex-wrap items-center justify-between gap-3 shadow-md sticky top-0 z-40">
-        <div class="flex flex-wrap items-center gap-2.5">
-            <span class="bg-amber-400 text-slate-950 px-2.5 py-1 rounded-xl font-black text-xs">🛠️ پنل مدیریت کل</span>
+        <div class="flex flex-wrap items-center gap-2">
+            <span class="bg-amber-400 text-slate-950 px-2.5 py-1 rounded-xl font-black text-xs">🛠️ مدیریت کل</span>
 
-            <div class="flex bg-slate-800 p-1 rounded-xl border border-slate-700 text-xs">
+            <div class="flex flex-wrap bg-slate-800 p-1 rounded-xl border border-slate-700 text-xs gap-1">
                 <button type="button" id="adm-tab-exams" onclick="switchAdminTab('exams')" class="px-3 py-1.5 rounded-lg font-extrabold bg-indigo-600 text-white transition flex items-center gap-1.5">
                     <span>📝 استودیو آزمون‌ساز</span>
                 </button>
+                <button type="button" id="adm-tab-courses" onclick="switchAdminTab('courses')" class="px-3 py-1.5 rounded-lg font-bold text-slate-300 hover:text-white transition flex items-center gap-1.5">
+                    <span>🎬 دوره‌ها و ویدیوها</span>
+                    <span id="header-courses-badge" class="bg-indigo-500 text-white px-1.5 py-0.5 rounded-full text-[10px] font-extrabold">0</span>
+                </button>
                 <button type="button" id="adm-tab-aikeys" onclick="switchAdminTab('aikeys')" class="px-3 py-1.5 rounded-lg font-bold text-slate-300 hover:text-white transition flex items-center gap-1.5">
-                    <span>🤖 کلیدهای هوش مصنوعی</span>
-                    <span id="header-ai-keys-badge" class="bg-emerald-600 text-white px-2 py-0.5 rounded-full text-[10px] font-extrabold">0</span>
+                    <span>🤖 کلیدهای AI</span>
+                    <span id="header-ai-keys-badge" class="bg-emerald-600 text-white px-1.5 py-0.5 rounded-full text-[10px] font-extrabold">0</span>
                 </button>
                 <button type="button" id="adm-tab-users" onclick="switchAdminTab('users')" class="px-3 py-1.5 rounded-lg font-bold text-slate-300 hover:text-white transition flex items-center gap-1.5">
-                    <span>👥 کاربران و اشتراک‌ها</span>
+                    <span>👥 کاربران و اشتراک</span>
                 </button>
             </div>
         </div>
 
-        <div class="flex items-center gap-2 text-xs font-bold">
-            <a href="exam.php" class="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-xl transition flex items-center gap-1 shadow">
-                <span>🎯 صفحه آزمون‌ها (نمای کاربر)</span>
+        <div class="flex flex-wrap items-center gap-1.5 text-xs font-bold">
+            <a href="courses.php" class="bg-indigo-600 hover:bg-indigo-500 text-white px-2.5 py-1.5 rounded-xl transition flex items-center gap-1 shadow">
+                <span>🎬 آکادمی ویدیو</span>
             </a>
-            <a href="index.php" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-xl border border-slate-700 transition">
-                📅 تقویم و جزوه‌خوان
+            <a href="exam.php" class="bg-emerald-600 hover:bg-emerald-500 text-white px-2.5 py-1.5 rounded-xl transition flex items-center gap-1 shadow">
+                <span>🎯 آزمون‌ها</span>
             </a>
-            <a href="paper_reader.php" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-xl border border-slate-700 transition">
+            <a href="index.php" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1.5 rounded-xl border border-slate-700 transition">
+                📅 تقویم و جزوه
+            </a>
+            <a href="paper_reader.php" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1.5 rounded-xl border border-slate-700 transition">
                 🌐 مقاله‌خوان
             </a>
         </div>
@@ -339,7 +336,6 @@ try {
     <!-- ==================================================== -->
     <main id="admin-section-exams" class="flex-1 p-3 md:p-5 max-w-[1600px] w-full mx-auto space-y-4">
 
-        <!-- نوار انتخاب آزمون فعال + دکمه کلید پاسخنامه دسته‌جمعی -->
         <div class="bg-white rounded-2xl shadow border border-slate-200 p-3.5 flex flex-wrap items-center justify-between gap-3">
             <div class="flex flex-wrap items-center gap-2 flex-1">
                 <label class="font-extrabold text-xs text-slate-700 shrink-0">📂 آزمون فعال:</label>
@@ -368,7 +364,6 @@ try {
             </div>
         </div>
 
-        <!-- پیام راهنما در صورت عدم انتخاب آزمون -->
         <div id="studio-empty-state" class="bg-white rounded-2xl border border-slate-200 p-10 text-center space-y-3">
             <div class="text-4xl">📝</div>
             <h2 class="font-extrabold text-base text-slate-800">استودیو طراحی آزمون و استخراج خودکار چندصفحه‌ای سوالات</h2>
@@ -380,12 +375,9 @@ try {
             </button>
         </div>
 
-        <!-- میز کار دو ستونه استودیو آزمون‌ساز -->
         <div id="studio-workspace" class="hidden grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
 
-            <!-- ========================================== -->
-            <!-- ستون راست (۷ واحد): بارگذاری PDF/عکس + ربات استخراج چندصفحه‌ای + برش خودکار و دستی -->
-            <!-- ========================================== -->
+            <!-- ستون راست آزمون‌ساز (۷ واحد) -->
             <div class="lg:col-span-7 bg-white rounded-2xl shadow border border-slate-200 overflow-hidden flex flex-col">
                 <div class="bg-slate-900 text-white px-4 py-3 flex flex-wrap items-center justify-between gap-2">
                     <div class="flex items-center gap-2">
@@ -402,7 +394,6 @@ try {
                     </label>
                 </div>
 
-                <!-- نوار اول: ورق زدن صفحه فعلی و استخراج تکی -->
                 <div id="source-toolbar" class="hidden bg-slate-100 border-b border-slate-200 px-3 py-2 flex-wrap items-center justify-between gap-2 text-xs">
                     <div id="source-pdf-pagination" class="flex items-center gap-1">
                         <button type="button" onclick="changeSourcePdfPage(-1)" class="px-2.5 py-1 bg-white border border-slate-300 hover:bg-slate-50 rounded-lg font-bold">❮ قبلی</button>
@@ -424,7 +415,6 @@ try {
                     </button>
                 </div>
 
-                <!-- نوار دوم: ربات خزنده خودکار چندصفحه‌ای (Multi-Page Auto-Crawler) -->
                 <div id="multi-page-crawler-bar" class="hidden bg-slate-900 text-white px-3.5 py-2.5 border-b border-indigo-800 space-y-2 text-xs">
                     <div class="flex flex-wrap items-center justify-between gap-2">
                         <div class="flex flex-wrap items-center gap-2">
@@ -438,12 +428,12 @@ try {
                                 <input type="number" id="crawler-end-page" min="1" value="1" class="w-12 text-center bg-slate-950 text-white rounded font-extrabold">
                             </div>
 
-                            <label class="flex items-center gap-1 cursor-pointer text-[11px] bg-slate-800 px-2 py-1 rounded-lg border border-slate-700" title="اگر شکلی در صفحه تشخیص داده شود، خودکار از روی صفحه برش خورده و به سوال پیوست می‌شود">
+                            <label class="flex items-center gap-1 cursor-pointer text-[11px] bg-slate-800 px-2 py-1 rounded-lg border border-slate-700">
                                 <input type="checkbox" id="crawler-auto-crop-fig" checked class="w-4 h-4 rounded">
                                 <span>✂️ برش خودکار شکل‌ها</span>
                             </label>
 
-                            <label class="flex items-center gap-1 cursor-pointer text-[11px] bg-slate-800 px-2 py-1 rounded-lg border border-slate-700" title="سوالات هر صفحه بلافاصله در بانک آزمون ذخیره شوند تا در فایل‌های طولانی چیزی از دست نرود">
+                            <label class="flex items-center gap-1 cursor-pointer text-[11px] bg-slate-800 px-2 py-1 rounded-lg border border-slate-700">
                                 <input type="checkbox" id="crawler-auto-save-db" checked class="w-4 h-4 rounded">
                                 <span>💾 ذخیره خودکار در بانک آزمون</span>
                             </label>
@@ -459,7 +449,6 @@ try {
                         </div>
                     </div>
 
-                    <!-- وضعیت زنده و نوار پیشرفت خزنده چندصفحه‌ای -->
                     <div id="crawler-status-box" class="hidden space-y-1 pt-1 border-t border-slate-800">
                         <div class="flex items-center justify-between text-[11px]">
                             <span id="crawler-status-text" class="text-emerald-300 font-bold">در حال آماده‌سازی...</span>
@@ -471,7 +460,6 @@ try {
                     </div>
                 </div>
 
-                <!-- نوار ابزار برش مستطیلی دستی با موس -->
                 <div id="crop-actions-bar" class="hidden bg-amber-50 border-b border-amber-300 px-3.5 py-2 flex-wrap items-center justify-between gap-2 text-xs">
                     <span class="font-extrabold text-amber-950 text-[11px] flex items-center gap-1">
                         <span>✂️ ناحیه انتخاب شد:</span>
@@ -490,7 +478,6 @@ try {
                     </div>
                 </div>
 
-                <!-- بوم نمایش صفحه PDF یا عکس سوالات -->
                 <div id="source-viewport" class="bg-slate-800 p-3 min-h-[420px] max-h-[72vh] overflow-auto custom-scroll flex items-start justify-center relative">
                     <div id="source-empty-placeholder" class="my-auto text-center text-slate-300 p-8 space-y-2">
                         <div class="text-4xl">📄</div>
@@ -506,7 +493,6 @@ try {
                     </div>
                 </div>
 
-                <!-- بخش پیش‌نمایش سوالات استخراج‌شده توسط هوش مصنوعی -->
                 <div id="ai-staged-container" class="hidden border-t-2 border-indigo-500 bg-indigo-50 p-4 space-y-3">
                     <div class="flex flex-wrap items-center justify-between gap-2 border-b border-indigo-200 pb-2.5">
                         <div>
@@ -530,12 +516,8 @@ try {
                 </div>
             </div>
 
-            <!-- ========================================== -->
-            <!-- ستون چپ (۵ واحد): فرم ثبت/ویرایش تکی سوال (با دکمه شبه‌کد) + بانک سوالات آزمون -->
-            <!-- ========================================== -->
+            <!-- ستون چپ آزمون‌ساز (۵ واحد) -->
             <div class="lg:col-span-5 space-y-4">
-
-                <!-- الف) فرم ویرایشگر دستی / تصویری / شبه‌کد -->
                 <div class="bg-white rounded-2xl shadow border border-slate-200 overflow-hidden">
                     <div class="bg-slate-800 text-white px-4 py-2.5 flex items-center justify-between">
                         <h3 id="question-editor-title" class="font-extrabold text-xs md:text-sm">➕ افزودن / ویرایش سوال</h3>
@@ -567,7 +549,7 @@ try {
                                     </label>
                                 </div>
                             </div>
-                            <textarea id="qe-text" rows="4" placeholder="صورت سوال را بنویسید... (برای شبه‌کد یا الگوریتم، کد را بین ``` قرار دهید یا دکمه درج شبه‌کد بالا را بزنید)" class="w-full p-2.5 border border-slate-300 rounded-xl focus:outline-none leading-relaxed"></textarea>
+                            <textarea id="qe-text" rows="4" placeholder="صورت سوال را بنویسید... (برای شبه‌کد یا الگوریتم، کد را بین ``` قرار دهید)" class="w-full p-2.5 border border-slate-300 rounded-xl focus:outline-none leading-relaxed"></textarea>
                         </div>
 
                         <div class="space-y-2">
@@ -596,7 +578,6 @@ try {
                     </form>
                 </div>
 
-                <!-- ب) لیست سوالات ثبت‌شده در این آزمون -->
                 <div class="bg-white rounded-2xl shadow border border-slate-200 overflow-hidden">
                     <div class="bg-slate-50 border-b border-slate-200 px-4 py-3 flex items-center justify-between">
                         <h3 class="font-extrabold text-xs md:text-sm text-slate-800">
@@ -607,14 +588,204 @@ try {
 
                     <div id="saved-questions-list" class="p-3.5 space-y-3 max-h-[580px] overflow-y-auto custom-scroll text-xs"></div>
                 </div>
-
             </div>
 
         </div>
     </main>
 
     <!-- ==================================================== -->
-    <!-- ۳. تب دوم: داشبورد مانیتورینگ کلیدهای هوش مصنوعی و میزان مصرف -->
+    <!-- ۳. تب دوم (جدید): مدیریت دوره‌ها، سرفصل‌ها و ویدیوهای آموزشی (🎬 Courses Studio) -->
+    <!-- ==================================================== -->
+    <section id="admin-section-courses" class="hidden flex-1 p-3 md:p-5 max-w-[1600px] w-full mx-auto space-y-4">
+
+        <!-- نوار انتخاب دوره فعال یا ساخت دوره جدید -->
+        <div class="bg-white rounded-2xl shadow border border-slate-200 p-3.5 flex flex-wrap items-center justify-between gap-3">
+            <div class="flex flex-wrap items-center gap-2 flex-1">
+                <label class="font-extrabold text-xs text-slate-700 shrink-0">🎬 دوره آموزشی فعال:</label>
+                <select id="admin-course-select" onchange="onSelectAdminCourse(this.value)" class="flex-1 max-w-md px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-extrabold text-slate-800 focus:outline-none">
+                    <option value="">-- در حال بارگذاری لیست دوره‌ها... --</option>
+                </select>
+                <button type="button" onclick="openCourseMetaModal(false)" id="btn-edit-course-meta" class="hidden px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition">
+                    ⚙️ ویرایش مشخصات دوره
+                </button>
+                <button type="button" onclick="deleteActiveCourse()" id="btn-delete-course" class="hidden px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl text-xs font-bold transition">
+                    🗑️ حذف دوره
+                </button>
+            </div>
+
+            <div class="flex items-center gap-2">
+                <a href="courses.php" class="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-amber-300 rounded-xl text-xs font-bold transition">
+                    👁️ پیش‌نمایش در پلیر سایت
+                </a>
+                <button type="button" onclick="openCourseMetaModal(true)" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl text-xs font-extrabold shadow transition flex items-center gap-1.5">
+                    <span>➕ ساخت دوره آموزشی جدید</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- پیام خالی بودن در صورت عدم وجود دوره -->
+        <div id="course-empty-state" class="bg-white rounded-2xl border border-slate-200 p-10 text-center space-y-3">
+            <div class="text-4xl">🎬</div>
+            <h2 class="font-extrabold text-base text-slate-800">استودیو مدیریت دوره‌های ویدیویی، زیرنویس‌ها و جزوات جلسات</h2>
+            <p class="text-xs text-slate-500 max-w-lg mx-auto leading-relaxed">
+                روی دکمه <b>«➕ ساخت دوره آموزشی جدید»</b> کلیک کنید تا اولین دوره خود را بسازید؛ سپس سرفصل‌ها، لینک ویدیوها، فایل زیرنویس (<code>.srt</code> / <code>.vtt</code>) و جزوه اختصاصی هر جلسه را اضافه نمایید.
+            </p>
+            <button type="button" onclick="openCourseMetaModal(true)" class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl text-xs font-extrabold shadow">
+                + ساخت اولین دوره ویدیویی
+            </button>
+        </div>
+
+        <!-- میز کار دو ستونه مدیریت فصل‌ها و جلسات ویدیویی -->
+        <div id="course-workspace" class="hidden grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+
+            <!-- ستون راست (۵ واحد): مدیریت درختی فصل‌ها (Chapters) و لیست جلسات هر فصل -->
+            <div class="lg:col-span-5 bg-white rounded-2xl shadow border border-slate-200 overflow-hidden flex flex-col">
+                <div class="bg-slate-900 text-white px-4 py-3 flex items-center justify-between">
+                    <div>
+                        <h3 class="font-extrabold text-xs md:text-sm" id="active-course-tree-title">📚 سرفصل‌ها و جلسات دوره</h3>
+                        <p class="text-[10px] text-slate-400">ابتدا فصل‌ها را بسازید و سپس جلسات ویدیویی را به هر فصل اضافه کنید</p>
+                    </div>
+                    <span id="course-total-lessons-badge" class="bg-indigo-600 text-white px-2.5 py-0.5 rounded-full text-[11px] font-extrabold">0 جلسه</span>
+                </div>
+
+                <!-- فرم افزودن سریع فصل جدید -->
+                <form onsubmit="saveCourseChapter(event)" class="p-3 bg-slate-100 border-b border-slate-200 flex items-center gap-2 text-xs">
+                    <input type="text" id="new-chapter-title" required placeholder="نام فصل جدید (مثلاً: فصل دوم - ژنتیک و تولیدمثل)..." class="flex-1 px-3 py-2 bg-white border border-slate-300 rounded-xl font-bold focus:outline-none">
+                    <button type="submit" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-2 rounded-xl font-extrabold shrink-0 shadow">
+                        📁 + افزودن فصل
+                    </button>
+                </form>
+
+                <!-- درخت فصل‌ها و جلسات زیرمجموعه -->
+                <div id="course-chapters-list" class="p-3.5 space-y-3 max-h-[70vh] overflow-y-auto custom-scroll text-xs"></div>
+            </div>
+
+            <!-- ستون چپ (۷ واحد): فرم جامع افزودن / ویرایش جلسه ویدیویی (لینک ویدیو، زیرنویس، جزوه، آزمون) -->
+            <div class="lg:col-span-7 bg-white rounded-2xl shadow border border-slate-200 overflow-hidden">
+                <div class="bg-slate-800 text-white px-4 py-3 flex items-center justify-between">
+                    <h3 id="lesson-editor-header-title" class="font-extrabold text-xs md:text-sm">➕ افزودن جلسه ویدیویی جدید</h3>
+                    <button type="button" onclick="resetLessonEditor()" class="text-xs text-slate-300 hover:text-white font-bold">🧹 پاک کردن و جلسه جدید</button>
+                </div>
+
+                <form id="lesson-editor-form" onsubmit="saveCourseLesson(event)" class="p-4 space-y-4 text-xs">
+                    <input type="hidden" id="le-id" value="0">
+
+                    <div class="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                        <div class="sm:col-span-2">
+                            <label class="block font-bold text-slate-700 mb-1">انتخاب فصل (سرفصل) *</label>
+                            <select id="le-chapter-id" name="chapter_id" required class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl font-extrabold text-slate-800 focus:outline-none"></select>
+                        </div>
+                        <div>
+                            <label class="block font-bold text-slate-700 mb-1">شماره ترتیب جلسه</label>
+                            <input type="number" id="le-sort-order" name="sort_order" min="1" value="1" class="w-full px-3 py-2 border border-slate-300 rounded-xl text-center font-bold">
+                        </div>
+                        <div>
+                            <label class="block font-bold text-slate-700 mb-1">مدت تقریبی (دقیقه)</label>
+                            <input type="number" id="le-duration-mins" name="duration_mins" min="0" step="1" value="30" placeholder="مثلاً 45" class="w-full px-3 py-2 border border-slate-300 rounded-xl text-center font-bold">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1">عنوان جلسه آموزشی *</label>
+                        <input type="text" id="le-title" name="title" required placeholder="مثلاً: جلسه ۱ — تحلیل خط‌به‌خط گفتار اول و حل تست‌های ترکیبی" class="w-full px-3 py-2 border border-slate-300 rounded-xl font-extrabold focus:outline-none">
+                    </div>
+
+                    <!-- بخش ۱: لینک‌های ویدیو (پشتیبانی از لینک مستقیم و لینک/کد امبد آپارات) -->
+                    <div class="bg-indigo-50 p-3.5 rounded-2xl border border-indigo-200 space-y-3">
+                        <div class="font-extrabold text-indigo-950 flex flex-wrap items-center justify-between gap-2">
+                            <span>🎥 لینک ویدیو (لینک مستقیم MP4 یا لینک / کد امبد آپارات)</span>
+                            <span class="text-[10px] bg-rose-100 text-rose-800 px-2 py-0.5 rounded-lg font-extrabold">🟣 پشتیبانی کامل از آپارات</span>
+                        </div>
+                        <div>
+                            <label class="block font-bold text-slate-700 mb-1">آدرس ویدیو یا کد iframe آپارات *</label>
+                            <div class="flex items-center gap-1.5">
+                                <input type="text" id="le-video-url" name="video_url" required dir="ltr" placeholder="https://www.aparat.com/v/xxxxx یا لینک مستقیم MP4" class="flex-1 px-3 py-2 bg-white border border-slate-300 rounded-xl font-mono text-left focus:outline-none">
+                                <button type="button" onclick="fetchAparatMetaForEditor()" id="btn-fetch-aparat" class="bg-rose-600 hover:bg-rose-500 text-white px-3 py-2 rounded-xl font-extrabold text-[11px] shrink-0 shadow transition">
+                                    🟣 استعلام از آپارات
+                                </button>
+                            </div>
+                            <div id="aparat-fetch-status" class="hidden text-[11px] font-bold text-emerald-700 mt-1"></div>
+                        </div>
+                        <div>
+                            <label class="block font-bold text-slate-600 mb-1">لینک کیفیت دوم یا سرور کمکی (اختیاری)</label>
+                            <input type="text" id="le-video-backup" name="video_url_backup" dir="ltr" placeholder="https://..." class="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-xl font-mono text-left text-[11px] focus:outline-none">
+                        </div>
+                    </div>
+
+                    <!-- بخش ۲: زیرنویس جلسه (.srt / .vtt) -->
+                    <div class="bg-emerald-50 p-3.5 rounded-2xl border border-emerald-200 space-y-2.5">
+                        <div class="font-extrabold text-emerald-950 flex items-center justify-between">
+                            <span>💬 زیرنویس هوشمند و متن تعاملی جلسه (اختیاری)</span>
+                            <span class="text-[10px] text-emerald-800 font-bold">فرمت‌های مجاز: .srt و .vtt</span>
+                        </div>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 items-end">
+                            <div>
+                                <label class="block text-[11px] font-bold text-slate-700 mb-1">آدرس مستقیم یا مسیر فایل زیرنویس:</label>
+                                <input type="text" id="le-subtitle-url" name="subtitle_url" dir="ltr" placeholder="uploads/courses/subtitles/... یا https://..." class="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl font-mono text-left text-[11px]">
+                            </div>
+                            <div>
+                                <label class="block text-[11px] font-bold text-slate-700 mb-1">یا آپلود مستقیم فایل زیرنویس (.srt / .vtt):</label>
+                                <input type="file" id="le-subtitle-file" name="subtitle_file" accept=".srt,.vtt,.txt" class="w-full bg-white border border-slate-300 rounded-xl p-1.5 text-[11px]">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- بخش ۳: جزوه و فایل پیوست اختصاصی همین جلسه -->
+                    <div class="bg-amber-50 p-3.5 rounded-2xl border border-amber-200 space-y-2.5">
+                        <div class="font-extrabold text-amber-950 flex items-center justify-between">
+                            <span>📥 جزوه اختصاصی و فایل پیوست این جلسه (اختیاری)</span>
+                            <span class="text-[10px] text-amber-800 font-bold">PDF, ZIP, RAR, DOCX</span>
+                        </div>
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5 items-end">
+                            <div>
+                                <label class="block text-[11px] font-bold text-slate-700 mb-1">عنوان دکمه دانلود جزوه:</label>
+                                <input type="text" id="le-booklet-title" name="booklet_title" value="جزوه و نکات جلسه" class="w-full px-2.5 py-2 bg-white border border-slate-300 rounded-xl font-bold">
+                            </div>
+                            <div>
+                                <label class="block text-[11px] font-bold text-slate-700 mb-1">لینک مستقیم جزوه:</label>
+                                <input type="text" id="le-booklet-url" name="booklet_url" dir="ltr" placeholder="uploads/courses/booklets/... یا https://..." class="w-full px-2.5 py-2 bg-white border border-slate-300 rounded-xl font-mono text-left text-[11px]">
+                            </div>
+                            <div>
+                                <label class="block text-[11px] font-bold text-slate-700 mb-1">یا آپلود فایل جزوه (PDF/ZIP):</label>
+                                <input type="file" id="le-booklet-file" name="booklet_file" accept=".pdf,.zip,.rar,.doc,.docx,.png,.jpg" class="w-full bg-white border border-slate-300 rounded-xl p-1.5 text-[11px]">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- بخش ۴: اتصال جلسه به آزمون و توضیحات -->
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                            <label class="block font-bold text-slate-700 mb-1">📝 اتصال به آزمون پایان جلسه (اختیاری)</label>
+                            <select id="le-linked-exam" name="linked_exam_id" class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl font-bold">
+                                <option value="">-- بدون آزمون متصل --</option>
+                            </select>
+                        </div>
+                        <div class="flex items-center pt-5">
+                            <label class="flex items-center gap-2 cursor-pointer bg-slate-50 px-3 py-2 rounded-xl border border-slate-200 w-full">
+                                <input type="checkbox" id="le-free-preview" name="is_free_preview" value="1" class="w-4 h-4 rounded">
+                                <span class="font-extrabold text-emerald-800 text-[11px]">🎁 این جلسه «پیش‌نمایش رایگان» برای همه کاربران باشد</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1">توضیحات، مباحث تدریس‌شده یا لینک‌های تکمیلی جلسه</label>
+                        <textarea id="le-description" name="description" rows="2" placeholder="توضیحات و نکات مهم این جلسه برای نمایش زیر ویدیو..." class="w-full p-2.5 border border-slate-300 rounded-xl focus:outline-none"></textarea>
+                    </div>
+
+                    <div class="flex justify-end gap-2 pt-2 border-t border-slate-200">
+                        <button type="submit" id="btn-save-lesson" class="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-extrabold shadow transition">
+                            💾 ذخیره جلسه ویدیویی در دوره
+                        </button>
+                    </div>
+                </form>
+            </div>
+
+        </div>
+    </section>
+
+    <!-- ==================================================== -->
+    <!-- ۴. تب سوم: داشبورد مانیتورینگ کلیدهای هوش مصنوعی و میزان مصرف -->
     <!-- ==================================================== -->
     <section id="admin-section-aikeys" class="hidden flex-1 p-3 md:p-6 max-w-6xl w-full mx-auto space-y-5">
 
@@ -637,7 +808,6 @@ try {
             </div>
         </div>
 
-        <!-- کارت‌های خلاصه مصرف کلیدها -->
         <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 text-center">
             <div class="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-sm">
                 <div class="text-[11px] text-slate-500 font-bold">🔑 تعداد کلیدهای فعال</div>
@@ -665,7 +835,6 @@ try {
             </div>
         </div>
 
-        <!-- جدول تفکیکی هر کلید -->
         <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
             <div class="bg-slate-800 text-white px-4 py-3 flex items-center justify-between text-xs">
                 <span class="font-extrabold">📋 جزئیات مصرف و وضعیت تک‌تک کلیدهای موجود در استخر</span>
@@ -692,7 +861,7 @@ try {
     </section>
 
     <!-- ==================================================== -->
-    <!-- ۴. تب سوم: مدیریت کاربران و کدهای فعال‌سازی اشتراک ویژه -->
+    <!-- ۵. تب چهارم: مدیریت کاربران و کدهای فعال‌سازی اشتراک ویژه -->
     <!-- ==================================================== -->
     <section id="admin-section-users" class="hidden flex-1 p-3 md:p-6 max-w-7xl w-full mx-auto space-y-6">
 
@@ -829,7 +998,70 @@ try {
     </section>
 
     <!-- ==================================================== -->
-    <!-- ۵. مودال ساخت یا ویرایش شناسنامه آزمون -->
+    <!-- ۶. مودال ساخت یا ویرایش شناسنامه دوره ویدیویی (🎬 Course Meta Modal) -->
+    <!-- ==================================================== -->
+    <div id="course-meta-modal" class="fixed inset-0 bg-slate-900 bg-opacity-70 hidden items-center justify-center p-4 z-50">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden text-xs">
+            <div class="bg-slate-900 text-white px-4 py-3 flex items-center justify-between">
+                <h3 id="course-meta-modal-title" class="font-extrabold text-sm">➕ ساخت دوره آموزشی جدید</h3>
+                <button type="button" onclick="closeCourseMetaModal()" class="text-slate-400 hover:text-white text-xl leading-none">&times;</button>
+            </div>
+            <form id="course-meta-form" onsubmit="saveCourseMeta(event)" class="p-4 space-y-3.5">
+                <input type="hidden" id="cm-id" name="id" value="0">
+
+                <div>
+                    <label class="block font-bold text-slate-700 mb-1">عنوان دوره آموزشی *</label>
+                    <input type="text" id="cm-title" name="title" required placeholder="مثلاً: دوره جامع زیست‌شناسی کنکور و نهایی" class="w-full px-3 py-2 border border-slate-300 rounded-xl font-extrabold focus:outline-none">
+                </div>
+
+                <div class="grid grid-cols-2 gap-2.5">
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1">نام استاد / مدرس</label>
+                        <input type="text" id="cm-instructor" name="instructor" placeholder="مثلاً: دکتر ..." class="w-full px-3 py-2 border border-slate-300 rounded-xl">
+                    </div>
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1">درس / دسته‌بندی</label>
+                        <input type="text" id="cm-category" name="category" value="زیست‌شناسی" placeholder="مثلاً: زیست، ریاضی، شیمی..." class="w-full px-3 py-2 border border-slate-300 rounded-xl">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-2.5 items-end">
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1">لینک تصویر کاور دوره (اختیاری)</label>
+                        <input type="text" id="cm-cover-url" name="cover_image" dir="ltr" placeholder="https://..." class="w-full px-2.5 py-2 border border-slate-300 rounded-xl font-mono text-left text-[11px]">
+                    </div>
+                    <div>
+                        <label class="block font-bold text-slate-700 mb-1">یا آپلود عکس کاور:</label>
+                        <input type="file" id="cm-cover-file" name="cover_file" accept="image/*" class="w-full border border-slate-300 rounded-xl p-1.5 bg-slate-50 text-[11px]">
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block font-bold text-slate-700 mb-1">توضیحات دوره (اختیاری)</label>
+                    <textarea id="cm-description" name="description" rows="2" placeholder="معرفی کوتاه مباحث و ویژگی‌های این دوره..." class="w-full px-3 py-2 border border-slate-300 rounded-xl"></textarea>
+                </div>
+
+                <div class="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2">
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" id="cm-vip-only" checked class="w-4 h-4 rounded">
+                        <span class="font-bold text-slate-700">👑 دوره ویژه مشترکین VIP باشد (جلسات دارای تیک رایگان برای همه باز خواهند بود)</span>
+                    </label>
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" id="cm-active" checked class="w-4 h-4 rounded">
+                        <span class="font-bold text-slate-700">✅ منتشر و فعال در صفحه دوره‌های سایت</span>
+                    </label>
+                </div>
+
+                <div class="flex justify-end gap-2 pt-2 border-t">
+                    <button type="button" onclick="closeCourseMetaModal()" class="px-3.5 py-2 bg-slate-100 rounded-xl font-bold">انصراف</button>
+                    <button type="submit" class="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-extrabold shadow">ذخیره دوره</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- ==================================================== -->
+    <!-- ۷. مودال ساخت یا ویرایش شناسنامه آزمون -->
     <!-- ==================================================== -->
     <div id="exam-meta-modal" class="fixed inset-0 bg-slate-900 bg-opacity-70 hidden items-center justify-center p-4 z-50">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden text-xs">
@@ -885,7 +1117,7 @@ try {
     </div>
 
     <!-- ==================================================== -->
-    <!-- ۶. مودال ورود سریع کلید پاسخنامه -->
+    <!-- ۸. مودال ورود سریع کلید پاسخنامه -->
     <!-- ==================================================== -->
     <div id="bulk-key-modal" class="fixed inset-0 bg-slate-900 bg-opacity-70 hidden items-center justify-center p-4 z-50">
         <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden text-xs">
@@ -911,18 +1143,19 @@ try {
     </div>
 
     <script>
+        // اولویت اول بارگذاری PDF.js از پوشه محلی هاست (assets/pdfjs)
         const PDFJS_CDN_LIST = [
+            {
+                lib: 'assets/pdfjs/pdf.min.js',
+                worker: 'assets/pdfjs/pdf.worker.min.js',
+                cmaps: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/',
+                fonts: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/standard_fonts/'
+            },
             {
                 lib: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js',
                 worker: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js',
                 cmaps: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/',
                 fonts: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/standard_fonts/'
-            },
-            {
-                lib: 'https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.min.js',
-                worker: 'https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js',
-                cmaps: 'https://unpkg.com/pdfjs-dist@3.11.174/cmaps/',
-                fonts: 'https://unpkg.com/pdfjs-dist@3.11.174/standard_fonts/'
             }
         ];
         let activeCdnConfig = PDFJS_CDN_LIST[0];
@@ -932,46 +1165,394 @@ try {
         }
 
         function switchAdminTab(tab) {
-            const exSec = document.getElementById('admin-section-exams');
-            const aiSec = document.getElementById('admin-section-aikeys');
-            const usSec = document.getElementById('admin-section-users');
-
-            const btnEx = document.getElementById('adm-tab-exams');
-            const btnAi = document.getElementById('adm-tab-aikeys');
-            const btnUs = document.getElementById('adm-tab-users');
-
-            exSec.classList.add('hidden');
-            aiSec.classList.add('hidden');
-            usSec.classList.add('hidden');
+            const sections = {
+                exams:   document.getElementById('admin-section-exams'),
+                courses: document.getElementById('admin-section-courses'),
+                aikeys:  document.getElementById('admin-section-aikeys'),
+                users:   document.getElementById('admin-section-users')
+            };
+            const buttons = {
+                exams:   document.getElementById('adm-tab-exams'),
+                courses: document.getElementById('adm-tab-courses'),
+                aikeys:  document.getElementById('adm-tab-aikeys'),
+                users:   document.getElementById('adm-tab-users')
+            };
 
             const inactiveCls = 'px-3 py-1.5 rounded-lg font-bold text-slate-300 hover:text-white transition flex items-center gap-1.5';
             const activeCls   = 'px-3 py-1.5 rounded-lg font-extrabold bg-indigo-600 text-white transition flex items-center gap-1.5';
 
-            btnEx.className = (tab === 'exams')  ? activeCls : inactiveCls;
-            btnAi.className = (tab === 'aikeys') ? activeCls : inactiveCls;
-            btnUs.className = (tab === 'users')  ? activeCls : inactiveCls;
+            Object.keys(sections).forEach(k => {
+                if (sections[k]) sections[k].classList.add('hidden');
+                if (buttons[k])  buttons[k].className = (k === tab) ? activeCls : inactiveCls;
+            });
 
-            if (tab === 'exams') {
-                exSec.classList.remove('hidden');
+            if (sections[tab]) sections[tab].classList.remove('hidden');
+
+            if (tab === 'courses') {
+                fetchAdminCourses();
             } else if (tab === 'aikeys') {
-                aiSec.classList.remove('hidden');
                 fetchAiKeysStatus();
-            } else {
-                usSec.classList.remove('hidden');
             }
         }
 
-        function formatRichQuestionHtml(rawText) {
-            if (!rawText) return '';
-            let safe = escapeHtml(rawText);
+        // ====================================================
+        // ۰. مدیریت کامل دوره‌ها، سرفصل‌ها و جلسات ویدیویی (🎬 Courses Studio)
+        // ====================================================
+        let adminCoursesList  = [];
+        let availableExamsRef = [];
+        let activeCourseObj   = null;
+        let courseChapters    = [];
+        let courseLessons     = [];
 
-            safe = safe.replace(/```(?:[a-zA-Z0-9_+-]*\n)?([\s\S]*?)```/g, function(_, codeContent) {
-                return `<pre dir="ltr" class="bg-slate-900 text-emerald-300 font-mono text-xs p-3 rounded-xl my-2 overflow-x-auto text-left leading-relaxed border border-slate-700">${codeContent.trim()}</pre>`;
-            });
+        async function fetchAdminCourses(selectCourseId = null) {
+            try {
+                const res = await fetch('api_courses.php?action=admin_list_courses');
+                const data = await res.json();
+                if (data.status !== 'success') return;
 
-            safe = safe.replace(/`([^`\n]+)`/g, '<code dir="ltr" class="bg-slate-200 text-indigo-900 font-mono px-1.5 py-0.5 rounded text-[11px]">$1</code>');
+                adminCoursesList  = data.courses || [];
+                availableExamsRef = data.exams || [];
 
-            return safe;
+                document.getElementById('header-courses-badge').textContent = adminCoursesList.length;
+
+                // پر کردن لیست آزمون‌ها در فرم جلسه ویدیویی
+                const examSel = document.getElementById('le-linked-exam');
+                if (examSel) {
+                    const curVal = examSel.value;
+                    examSel.innerHTML = '<option value="">-- بدون آزمون متصل --</option>' +
+                        availableExamsRef.map(ex => `<option value="${ex.id}">📝 ${escapeHtml(ex.title)} (${escapeHtml(ex.category || 'عمومی')})</option>`).join('');
+                    examSel.value = curVal;
+                }
+
+                const selectEl = document.getElementById('admin-course-select');
+                if (adminCoursesList.length === 0) {
+                    selectEl.innerHTML = '<option value="">-- هنوز دوره‌ای نساخته‌اید --</option>';
+                    document.getElementById('course-empty-state').classList.remove('hidden');
+                    document.getElementById('course-workspace').classList.add('hidden');
+                    document.getElementById('btn-edit-course-meta').classList.add('hidden');
+                    document.getElementById('btn-delete-course').classList.add('hidden');
+                    return;
+                }
+
+                let html = '<option value="">-- یک دوره آموزشی را انتخاب کنید --</option>';
+                adminCoursesList.forEach(c => {
+                    const stIcon  = Number(c.is_active) === 1 ? '🟢' : '⚪';
+                    const vipIcon = Number(c.is_vip_only) === 1 ? '👑 ' : '🎁 ';
+                    html += `<option value="${c.id}">${stIcon} ${vipIcon}${escapeHtml(c.title)} (${c.chapters_count} فصل | ${c.lessons_count} جلسه)</option>`;
+                });
+                selectEl.innerHTML = html;
+
+                const targetId = selectCourseId || (activeCourseObj ? activeCourseObj.id : adminCoursesList[0].id);
+                if (targetId) {
+                    selectEl.value = String(targetId);
+                    await onSelectAdminCourse(targetId);
+                }
+            } catch (e) {
+                console.error('Error fetching admin courses:', e);
+            }
+        }
+
+        async function onSelectAdminCourse(courseId) {
+            if (!courseId) {
+                activeCourseObj = null;
+                document.getElementById('course-empty-state').classList.remove('hidden');
+                document.getElementById('course-workspace').classList.add('hidden');
+                document.getElementById('btn-edit-course-meta').classList.add('hidden');
+                document.getElementById('btn-delete-course').classList.add('hidden');
+                return;
+            }
+
+            const res = await fetch(`api_courses.php?action=admin_get_course&course_id=${courseId}`);
+            const data = await res.json();
+            if (data.status === 'success') {
+                activeCourseObj = data.course;
+                courseChapters  = data.chapters || [];
+                courseLessons   = data.lessons || [];
+
+                document.getElementById('course-empty-state').classList.add('hidden');
+                document.getElementById('course-workspace').classList.remove('hidden');
+                document.getElementById('btn-edit-course-meta').classList.remove('hidden');
+                document.getElementById('btn-delete-course').classList.remove('hidden');
+
+                document.getElementById('active-course-tree-title').textContent = `📚 سرفصل‌های «${activeCourseObj.title}»`;
+                document.getElementById('course-total-lessons-badge').textContent = `${courseLessons.length} جلسه`;
+
+                syncLessonChapterDropdown();
+                renderCourseChaptersTree();
+            }
+        }
+
+        function syncLessonChapterDropdown() {
+            const sel = document.getElementById('le-chapter-id');
+            if (!sel) return;
+            const prev = sel.value;
+            if (courseChapters.length === 0) {
+                sel.innerHTML = '<option value="">-- ابتدا یک فصل از ستون راست بسازید --</option>';
+                return;
+            }
+            sel.innerHTML = courseChapters.map(ch => `<option value="${ch.id}">📁 ${escapeHtml(ch.title)}</option>`).join('');
+            if (prev && courseChapters.some(c => String(c.id) === String(prev))) {
+                sel.value = prev;
+            } else {
+                sel.value = String(courseChapters[0].id);
+            }
+        }
+
+        function renderCourseChaptersTree() {
+            const container = document.getElementById('course-chapters-list');
+            if (courseChapters.length === 0) {
+                container.innerHTML = `<div class="text-center text-slate-400 py-8">هنوز فصلی برای این دوره ثبت نشده است. از کادر بالا نام فصل اول را وارد کنید.</div>`;
+                return;
+            }
+
+            container.innerHTML = courseChapters.map((ch, cIdx) => {
+                const chLessons = courseLessons.filter(l => Number(l.chapter_id) === Number(ch.id));
+
+                const lessonsHtml = chLessons.length === 0
+                    ? `<div class="text-[11px] text-slate-400 py-2 text-center">هنوز جلسه‌ای در این فصل ثبت نشده است.</div>`
+                    : chLessons.map((ls, lIdx) => {
+                        const mins = ls.duration_sec > 0 ? Math.round(ls.duration_sec / 60) + ' دقیقه' : 'زمان خودکار';
+                        const hasSub = !emptyStr(ls.subtitle_url);
+                        const hasBkl = !emptyStr(ls.booklet_url);
+                        const hasExm = Number(ls.linked_exam_id) > 0;
+                        const isFree = Number(ls.is_free_preview) === 1;
+
+                        return `
+                            <div class="p-2.5 bg-white rounded-xl border border-slate-200 hover:border-indigo-300 transition space-y-1.5">
+                                <div class="flex items-start justify-between gap-2">
+                                    <div class="font-extrabold text-slate-800 leading-snug">
+                                        <span class="text-indigo-600 ml-1">${lIdx + 1}.</span>${escapeHtml(ls.title)}
+                                    </div>
+                                    <div class="flex items-center gap-1.5 shrink-0">
+                                        <button type="button" onclick="loadLessonIntoEditor(${ls.id})" class="text-indigo-600 hover:underline font-bold text-[11px]">✏️ ویرایش</button>
+                                        <button type="button" onclick="deleteCourseLesson(${ls.id})" class="text-rose-500 hover:text-rose-700 font-bold text-[11px]">🗑️</button>
+                                    </div>
+                                </div>
+                                <div class="flex flex-wrap items-center gap-1 text-[10px] font-bold">
+                                    <span class="bg-slate-100 text-slate-600 px-2 py-0.5 rounded">⏱️ ${mins}</span>
+                                    ${isFree ? `<span class="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded">🎁 رایگان</span>` : ''}
+                                    ${hasSub ? `<span class="bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded">💬 زیرنویس</span>` : ''}
+                                    ${hasBkl ? `<span class="bg-amber-100 text-amber-900 px-2 py-0.5 rounded">📥 جزوه</span>` : ''}
+                                    ${hasExm ? `<span class="bg-rose-50 text-rose-700 px-2 py-0.5 rounded">📝 آزمون متصل</span>` : ''}
+                                </div>
+                            </div>
+                        `;
+                    }).join('');
+
+                return `
+                    <div class="bg-slate-50 rounded-2xl border border-slate-200 overflow-hidden">
+                        <div class="bg-slate-200 px-3 py-2 flex items-center justify-between gap-2">
+                            <div class="font-extrabold text-slate-800 truncate">
+                                📁 فصل ${cIdx + 1}: ${escapeHtml(ch.title)}
+                                <span class="text-[10px] bg-white text-slate-600 px-1.5 py-0.5 rounded-full mr-1">${chLessons.length}</span>
+                            </div>
+                            <div class="flex items-center gap-1 shrink-0">
+                                <button type="button" onclick="prepareNewLessonForChapter(${ch.id})" class="bg-indigo-600 hover:bg-indigo-700 text-white px-2 py-0.5 rounded-lg text-[10px] font-bold">+ جلسه</button>
+                                <button type="button" onclick="editChapterPrompt(${ch.id}, '${escapeHtml(ch.title)}', ${ch.sort_order})" class="text-slate-600 hover:text-indigo-600 px-1 text-xs" title="ویرایش نام فصل">✏️</button>
+                                <button type="button" onclick="deleteCourseChapter(${ch.id})" class="text-slate-400 hover:text-rose-600 px-1 text-xs" title="حذف فصل">🗑️</button>
+                            </div>
+                        </div>
+                        <div class="p-2.5 space-y-2">
+                            ${lessonsHtml}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function emptyStr(val) {
+            return !val || String(val).trim() === '';
+        }
+
+        function openCourseMetaModal(isNew = true) {
+            const form = document.getElementById('course-meta-form');
+            form.reset();
+
+            if (isNew || !activeCourseObj) {
+                document.getElementById('course-meta-modal-title').textContent = '➕ ساخت دوره آموزشی جدید';
+                document.getElementById('cm-id').value       = '0';
+                document.getElementById('cm-vip-only').checked = true;
+                document.getElementById('cm-active').checked   = true;
+            } else {
+                document.getElementById('course-meta-modal-title').textContent = '⚙️ ویرایش مشخصات دوره';
+                document.getElementById('cm-id').value          = activeCourseObj.id;
+                document.getElementById('cm-title').value       = activeCourseObj.title || '';
+                document.getElementById('cm-instructor').value  = activeCourseObj.instructor || '';
+                document.getElementById('cm-category').value    = activeCourseObj.category || 'عمومی';
+                document.getElementById('cm-cover-url').value   = activeCourseObj.cover_image || '';
+                document.getElementById('cm-description').value = activeCourseObj.description || '';
+                document.getElementById('cm-vip-only').checked  = Number(activeCourseObj.is_vip_only) === 1;
+                document.getElementById('cm-active').checked    = Number(activeCourseObj.is_active) === 1;
+            }
+
+            const m = document.getElementById('course-meta-modal');
+            m.classList.remove('hidden');
+            m.classList.add('flex');
+        }
+
+        function closeCourseMetaModal() {
+            const m = document.getElementById('course-meta-modal');
+            m.classList.add('hidden');
+            m.classList.remove('flex');
+        }
+
+        async function saveCourseMeta(e) {
+            e.preventDefault();
+            const fd = new FormData(document.getElementById('course-meta-form'));
+            fd.append('action', 'save_course');
+            fd.set('is_vip_only', document.getElementById('cm-vip-only').checked ? '1' : '0');
+            fd.set('is_active', document.getElementById('cm-active').checked ? '1' : '0');
+
+            const res = await fetch('api_courses.php', { method: 'POST', body: fd });
+            const data = await res.json();
+            if (data.status === 'success') {
+                closeCourseMetaModal();
+                await fetchAdminCourses(data.course_id);
+            } else {
+                alert(data.message || 'خطا در ذخیره دوره');
+            }
+        }
+
+        async function deleteActiveCourse() {
+            if (!activeCourseObj || !confirm(`آیا از حذف کامل دوره «${activeCourseObj.title}» و تمام فصل‌ها و جلسات آن مطمئن هستید؟`)) return;
+            const fd = new FormData();
+            fd.append('action', 'delete_course');
+            fd.append('course_id', activeCourseObj.id);
+            await fetch('api_courses.php', { method: 'POST', body: fd });
+            activeCourseObj = null;
+            fetchAdminCourses();
+        }
+
+        async function saveCourseChapter(e) {
+            e.preventDefault();
+            if (!activeCourseObj) return;
+            const titleInput = document.getElementById('new-chapter-title');
+            const title = titleInput.value.trim();
+            if (!title) return;
+
+            const fd = new FormData();
+            fd.append('action', 'save_chapter');
+            fd.append('course_id', activeCourseObj.id);
+            fd.append('title', title);
+
+            const res = await fetch('api_courses.php', { method: 'POST', body: fd });
+            const data = await res.json();
+            if (data.status === 'success') {
+                titleInput.value = '';
+                await onSelectAdminCourse(activeCourseObj.id);
+                document.getElementById('le-chapter-id').value = String(data.chapter_id);
+            } else {
+                alert(data.message || 'خطا در ثبت فصل');
+            }
+        }
+
+        async function editChapterPrompt(chId, oldTitle, sortOrder) {
+            const newTitle = prompt('عنوان جدید فصل را وارد کنید:', oldTitle);
+            if (!newTitle || !newTitle.trim() || !activeCourseObj) return;
+
+            const fd = new FormData();
+            fd.append('action', 'save_chapter');
+            fd.append('id', chId);
+            fd.append('course_id', activeCourseObj.id);
+            fd.append('title', newTitle.trim());
+            fd.append('sort_order', sortOrder || 1);
+
+            await fetch('api_courses.php', { method: 'POST', body: fd });
+            onSelectAdminCourse(activeCourseObj.id);
+        }
+
+        async function deleteCourseChapter(chId) {
+            if (!confirm('آیا از حذف این فصل و تمام جلسات داخل آن مطمئن هستید؟')) return;
+            const fd = new FormData();
+            fd.append('action', 'delete_chapter');
+            fd.append('chapter_id', chId);
+            await fetch('api_courses.php', { method: 'POST', body: fd });
+            if (activeCourseObj) onSelectAdminCourse(activeCourseObj.id);
+        }
+
+        function prepareNewLessonForChapter(chapterId) {
+            resetLessonEditor();
+            document.getElementById('le-chapter-id').value = String(chapterId);
+            const chLessons = courseLessons.filter(l => Number(l.chapter_id) === Number(chapterId));
+            document.getElementById('le-sort-order').value = chLessons.length + 1;
+            document.getElementById('le-title').focus();
+        }
+
+        function resetLessonEditor() {
+            const curChap = document.getElementById('le-chapter-id').value;
+            document.getElementById('lesson-editor-form').reset();
+            document.getElementById('le-id').value = '0';
+            document.getElementById('lesson-editor-header-title').textContent = '➕ افزودن جلسه ویدیویی جدید';
+            document.getElementById('le-booklet-title').value = 'جزوه و نکات جلسه';
+            document.getElementById('le-duration-mins').value = '30';
+            if (curChap) document.getElementById('le-chapter-id').value = curChap;
+        }
+
+        function loadLessonIntoEditor(lessonId) {
+            const ls = courseLessons.find(x => Number(x.id) === Number(lessonId));
+            if (!ls) return;
+
+            document.getElementById('lesson-editor-header-title').textContent = `✏️ ویرایش جلسه: ${ls.title}`;
+            document.getElementById('le-id').value            = ls.id;
+            document.getElementById('le-chapter-id').value    = ls.chapter_id;
+            document.getElementById('le-sort-order').value    = ls.sort_order || 1;
+            document.getElementById('le-duration-mins').value = ls.duration_sec > 0 ? Math.round(ls.duration_sec / 60) : 0;
+            document.getElementById('le-title').value         = ls.title || '';
+            document.getElementById('le-video-url').value     = ls.video_url || '';
+            document.getElementById('le-video-backup').value  = ls.video_url_backup || '';
+            document.getElementById('le-subtitle-url').value  = ls.subtitle_url || '';
+            document.getElementById('le-booklet-title').value = ls.booklet_title || 'جزوه و نکات جلسه';
+            document.getElementById('le-booklet-url').value   = ls.booklet_url || '';
+            document.getElementById('le-linked-exam').value   = ls.linked_exam_id || '';
+            document.getElementById('le-free-preview').checked = Number(ls.is_free_preview) === 1;
+            document.getElementById('le-description').value   = ls.description || '';
+
+            document.getElementById('le-subtitle-file').value = '';
+            document.getElementById('le-booklet-file').value  = '';
+
+            document.getElementById('lesson-editor-form').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+
+        async function saveCourseLesson(e) {
+            e.preventDefault();
+            if (!activeCourseObj) return;
+
+            const btn = document.getElementById('btn-save-lesson');
+            const origText = btn.textContent;
+            btn.disabled = true;
+            btn.textContent = '⏳ در حال آپلود و ذخیره جلسه...';
+
+            try {
+                const fd = new FormData(document.getElementById('lesson-editor-form'));
+                fd.append('action', 'save_lesson');
+                fd.append('id', document.getElementById('le-id').value);
+                fd.append('course_id', activeCourseObj.id);
+                fd.set('is_free_preview', document.getElementById('le-free-preview').checked ? '1' : '0');
+
+                const res = await fetch('api_courses.php', { method: 'POST', body: fd });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    resetLessonEditor();
+                    await fetchAdminCourses(activeCourseObj.id);
+                    alert(data.message);
+                } else {
+                    alert(data.message || 'خطا در ذخیره جلسه');
+                }
+            } catch (err) {
+                alert('خطا در ارتباط با سرور.');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = origText;
+            }
+        }
+
+        async function deleteCourseLesson(lessonId) {
+            if (!confirm('این جلسه ویدیویی حذف شود؟')) return;
+            const fd = new FormData();
+            fd.append('action', 'delete_lesson');
+            fd.append('lesson_id', lessonId);
+            await fetch('api_courses.php', { method: 'POST', body: fd });
+            if (activeCourseObj) fetchAdminCourses(activeCourseObj.id);
         }
 
         // ====================================================
@@ -1082,6 +1663,19 @@ try {
         let activeExamObj     = null;
         let savedQuestions    = [];
         let aiStagedQuestions = [];
+
+        function formatRichQuestionHtml(rawText) {
+            if (!rawText) return '';
+            let safe = escapeHtml(rawText);
+
+            safe = safe.replace(/```(?:[a-zA-Z0-9_+-]*\n)?([\s\S]*?)```/g, function(_, codeContent) {
+                return `<pre dir="ltr" class="bg-slate-900 text-emerald-300 font-mono text-xs p-3 rounded-xl my-2 overflow-x-auto text-left leading-relaxed border border-slate-700">${codeContent.trim()}</pre>`;
+            });
+
+            safe = safe.replace(/`([^`\n]+)`/g, '<code dir="ltr" class="bg-slate-200 text-indigo-900 font-mono px-1.5 py-0.5 rounded text-[11px]">$1</code>');
+
+            return safe;
+        }
 
         async function fetchAdminExams(selectExamId = null) {
             try {
@@ -2007,8 +2601,59 @@ try {
 
         window.addEventListener('DOMContentLoaded', () => {
             fetchAdminExams();
+            fetchAdminCourses();
             fetchAiKeysStatus();
+
+            if (new URLSearchParams(window.location.search).get('tab') === 'courses') {
+                switchAdminTab('courses');
+            }
         });
+
+        async function fetchAparatMetaForEditor() {
+        const urlInput = document.getElementById('le-video-url');
+        const statusEl = document.getElementById('aparat-fetch-status');
+        const btn      = document.getElementById('btn-fetch-aparat');
+        const rawVal   = urlInput.value.trim();
+
+        if (!rawVal) {
+            alert('لطفاً ابتدا لینک صفحه آپارات یا کد امبد آن را در کادر وارد کنید.');
+            return;
+        }
+
+        btn.disabled = true;
+        btn.textContent = '⏳ در حال دریافت...';
+
+        try {
+            const fd = new FormData();
+            fd.append('action', 'fetch_aparat_meta');
+            fd.append('video_url', rawVal);
+
+            const res = await fetch('api_courses.php', { method: 'POST', body: fd });
+            const data = await res.json();
+
+            if (data.status === 'success') {
+                urlInput.value = data.clean_url;
+                const titleInput = document.getElementById('le-title');
+                if (!titleInput.value.trim() && data.title) {
+                    titleInput.value = data.title;
+                }
+                if (data.duration_mins > 0) {
+                    document.getElementById('le-duration-mins').value = data.duration_mins;
+                }
+                if (statusEl) {
+                    statusEl.textContent = `✓ ویدیوی آپارات شناسایی شد: «${data.title || data.aparat_hash}» | زمان: ${data.duration_mins} دقیقه | استریم مستقیم: ${data.has_direct_mp4 ? 'فعال ✅' : 'پلیر آی‌فریم 🟣'}`;
+                    statusEl.classList.remove('hidden');
+                }
+            } else {
+                alert(data.message || 'خطا در شناسایی لینک آپارات');
+            }
+        } catch (e) {
+            alert('خطا در ارتباط با سرور.');
+        } finally {
+            btn.disabled = false;
+            btn.textContent = '🟣 استعلام از آپارات';
+        }
+    }
     </script>
 </body>
 </html>

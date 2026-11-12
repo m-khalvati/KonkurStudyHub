@@ -1,6 +1,6 @@
 -- ============================================================================
--- Smart Study Planner, PDF Booklet Studio, Academic Paper Reader & AI Exam LMS
--- Version: 4.3 (Full Schema - 13 Tables)
+-- Smart Study Planner, PDF Booklet Studio, Paper Reader, AI Exam & Video LMS
+-- Version: 4.4 (Complete Database Schema - 18 Tables)
 -- Database Charset: utf8mb4 / Collation: utf8mb4_persian_ci
 -- ============================================================================
 
@@ -253,6 +253,99 @@ CREATE TABLE IF NOT EXISTS `ai_key_stats` (
   `last_error` varchar(255) DEFAULT NULL,
   `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`key_hash`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_persian_ci;
+
+-- ----------------------------------------------------------------------------
+-- 14. جدول دوره‌های ویدیویی آموزشی (courses)
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `courses` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `title` varchar(255) NOT NULL,
+  `instructor` varchar(120) DEFAULT NULL,
+  `category` varchar(100) DEFAULT 'عمومی',
+  `description` text DEFAULT NULL,
+  `cover_image` varchar(255) DEFAULT NULL,
+  `is_vip_only` tinyint(1) NOT NULL DEFAULT 1 COMMENT '1=ویژه مشترکین VIP, 0=رایگان برای همه',
+  `is_active` tinyint(1) NOT NULL DEFAULT 1 COMMENT '1=منتشرشده, 0=پیش‌نویس',
+  `sort_order` int(11) NOT NULL DEFAULT 1,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_persian_ci;
+
+-- ----------------------------------------------------------------------------
+-- 15. جدول فصل‌ها و سرفصل‌های هر دوره ویدیویی (course_chapters)
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `course_chapters` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `course_id` int(11) NOT NULL,
+  `title` varchar(255) NOT NULL,
+  `sort_order` int(11) NOT NULL DEFAULT 1,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_chap_course` (`course_id`, `sort_order`),
+  CONSTRAINT `fk_chap_course` FOREIGN KEY (`course_id`) REFERENCES `courses` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_persian_ci;
+
+-- ----------------------------------------------------------------------------
+-- 16. جدول جلسات ویدیویی، زیرنویس‌ها، جزوات و لینک آپارات (course_lessons)
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `course_lessons` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `course_id` int(11) NOT NULL,
+  `chapter_id` int(11) NOT NULL,
+  `title` varchar(255) NOT NULL,
+  `description` text DEFAULT NULL,
+  `video_url` text NOT NULL COMMENT 'لینک مستقیم ویدیو یا لینک/کد امبد آپارات',
+  `video_url_backup` text DEFAULT NULL COMMENT 'لینک کیفیت دوم یا کمکی',
+  `duration_sec` int(11) NOT NULL DEFAULT 0,
+  `subtitle_url` text DEFAULT NULL COMMENT 'فایل یا لینک زیرنویس SRT/VTT',
+  `booklet_url` text DEFAULT NULL COMMENT 'فایل یا لینک جزوه اختصاصی جلسه',
+  `booklet_title` varchar(150) DEFAULT 'جزوه و نکات جلسه',
+  `linked_exam_id` int(11) DEFAULT NULL COMMENT 'اتصال به آزمون مرتبط در exam.php',
+  `is_free_preview` tinyint(1) NOT NULL DEFAULT 0 COMMENT '1=پیش‌نمایش رایگان برای همه, 0=تابع وضعیت دوره',
+  `sort_order` int(11) NOT NULL DEFAULT 1,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_less_course_chap` (`course_id`, `chapter_id`, `sort_order`),
+  CONSTRAINT `fk_less_course` FOREIGN KEY (`course_id`) REFERENCES `courses` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_less_chap` FOREIGN KEY (`chapter_id`) REFERENCES `course_chapters` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_persian_ci;
+
+-- ----------------------------------------------------------------------------
+-- 17. جدول ذخیره ثانیه‌به‌ثانیه پیشرفت پخش ویدیو برای هر کاربر (video_progress)
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `video_progress` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `user_id` int(11) NOT NULL,
+  `course_id` int(11) NOT NULL,
+  `lesson_id` int(11) NOT NULL,
+  `current_time_sec` int(11) NOT NULL DEFAULT 0,
+  `duration_sec` int(11) NOT NULL DEFAULT 0,
+  `max_watched_sec` int(11) NOT NULL DEFAULT 0,
+  `is_completed` tinyint(1) NOT NULL DEFAULT 0,
+  `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_user_lesson_prog` (`user_id`, `lesson_id`),
+  KEY `idx_user_course_prog` (`user_id`, `course_id`),
+  CONSTRAINT `fk_vprog_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_vprog_lesson` FOREIGN KEY (`lesson_id`) REFERENCES `course_lessons` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_persian_ci;
+
+-- ----------------------------------------------------------------------------
+-- 18. جدول یادداشت‌های زمان‌دار دانشجو روی ویدیو (video_notes)
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `video_notes` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `user_id` int(11) NOT NULL,
+  `course_id` int(11) NOT NULL,
+  `lesson_id` int(11) NOT NULL,
+  `timestamp_sec` int(11) NOT NULL DEFAULT 0,
+  `note_text` text NOT NULL,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_vnote_user_lesson` (`user_id`, `lesson_id`, `timestamp_sec`),
+  CONSTRAINT `fk_vnote_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_vnote_lesson` FOREIGN KEY (`lesson_id`) REFERENCES `course_lessons` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_persian_ci;
 
 SET FOREIGN_KEY_CHECKS = 1;

@@ -1,0 +1,36 @@
+/* Modular Stylesheet for exam.php */
+body { font-family: 'Vazirmatn', sans-serif; -webkit-tap-highlight-color: transparent; }
+        .custom-scroll::-webkit-scrollbar { width: 5px; height: 5px; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+
+        /* استایل حباب‌های پاسخبرگ کنکوری */
+        .bubble-cell {
+            width: 26px;
+            height: 18px;
+            border-radius: 999px;
+            border: 1.5px solid #94a3b8;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            font-weight: 800;
+            color: #475569;
+            cursor: pointer;
+            transition: all 0.12s ease;
+            user-select: none;
+        }
+        .bubble-cell:hover {
+            border-color: #4f46e5;
+            color: #4f46e5;
+        }
+        .bubble-cell.filled {
+            background-color: #312e81;
+            border-color: #312e81;
+            color: #ffffff;
+        }
+
+        @media print {
+            .no-print { display: none !important; }
+            body { background: #ffffff !important; height: auto !important; overflow: visible !important; }
+            #view-report-card { overflow: visible !important; height: auto !important; }
+        }

@@ -1,0 +1,3003 @@
+/**
+ * Modular Frontend Logic for index.php
+ */
+// ====================================================
+        // ۰. تضمین بارگذاری صددرصدی PDF.js در تمام مرورگرها
+        // ====================================================
+        const PDFJS_CDN_LIST = [
+            {
+                lib: 'assets/pdfjs/pdf.min.js',
+                worker: 'assets/pdfjs/pdf.worker.min.js',
+                cmaps: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/',
+                fonts: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/standard_fonts/'
+            },
+            {
+                lib: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js',
+                worker: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js',
+                cmaps: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/',
+                fonts: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/standard_fonts/'
+            },
+            {
+                lib: 'https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.min.js',
+                worker: 'https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js',
+                cmaps: 'https://unpkg.com/pdfjs-dist@3.11.174/cmaps/',
+                fonts: 'https://unpkg.com/pdfjs-dist@3.11.174/standard_fonts/'
+            }
+        ];
+        let activeCdnConfig = PDFJS_CDN_LIST[0];
+
+        function loadScriptDynamic(src) {
+            return new Promise((resolve, reject) => {
+                const s = document.createElement('script');
+                s.src = src;
+                s.async = true;
+                s.onload = () => resolve();
+                s.onerror = () => reject(new Error('Failed to load ' + src));
+                document.head.appendChild(s);
+            });
+        }
+
+        async function ensurePdfJsReady() {
+            if (typeof window.pdfjsLib !== 'undefined') {
+                window.pdfjsLib.GlobalWorkerOptions.workerSrc = activeCdnConfig.worker;
+                return window.pdfjsLib;
+            }
+            for (const cdn of PDFJS_CDN_LIST) {
+                try {
+                    await loadScriptDynamic(cdn.lib);
+                    if (typeof window.pdfjsLib !== 'undefined') {
+                        activeCdnConfig = cdn;
+                        window.pdfjsLib.GlobalWorkerOptions.workerSrc = cdn.worker;
+                        return window.pdfjsLib;
+                    }
+                } catch (e) {}
+            }
+            throw new Error('موتور نمایشگر PDF بارگذاری نشد. لطفاً صفحه را رفرش کنید.');
+        }
+
+        if (typeof window.pdfjsLib !== 'undefined') {
+            window.pdfjsLib.GlobalWorkerOptions.workerSrc = activeCdnConfig.worker;
+        }
+
+        // ====================================================
+        // متغیرهای پایه، وضعیت اشتراک و تنظیمات مقیاس تقویم
+        // ====================================================
+
+
+        let viewMode = window.innerWidth < 768 ? 'day' : 'week';
+        let calendarFilter = 'all';
+        let anchorDate = new Date(TODAY_GREGORIAN + 'T00:00:00');
+        let loadedEvents = [];
+        let overdueEvents = [];
+        let customCategories = [];
+        let calendarStats = {};
+
+        // ارتفاع هر ساعت در تقویم: 60px (استاندارد) یا 92px (نمای باز برای برنامه‌های ۱۵/۳۰ دقیقه‌ای)
+        let hourHeightPx = 60;
+
+        const DEFAULT_CATEGORIES = [
+            { id: 'def_1', name: 'تخصصی',  color: '#4f46e5', is_study: 1, isDefault: true },
+            { id: 'def_2', name: 'مرور',   color: '#059669', is_study: 1, isDefault: true },
+            { id: 'def_3', name: 'تست‌زنی', color: '#d97706', is_study: 1, isDefault: true },
+            { id: 'def_4', name: 'آزمون',  color: '#e11d48', is_study: 1, isDefault: true },
+            { id: 'def_5', name: 'متفرقه', color: '#7c3aed', is_study: 0, isDefault: true }
+        ];
+
+        const CUSTOM_ALLOWED_COLORS = [
+            { hex: '#0891b2', title: 'فیروزه‌ای' },
+            { hex: '#db2777', title: 'سرخابی' },
+            { hex: '#ea580c', title: 'نارنجی' },
+            { hex: '#65a30d', title: 'سبز لیمویی' },
+            { hex: '#0284c7', title: 'آبی آسمانی' },
+            { hex: '#854d0e', title: 'قهوه‌ای برنزی' },
+            { hex: '#334155', title: 'سرمه‌ای تیره' },
+            { hex: '#f43f5e', title: 'مرجانی' },
+            { hex: '#0d9488', title: 'سبز دریایی' },
+            { hex: '#c026d3', title: 'ارغوانی' }
+        ];
+        let selectedNewCatColor = CUSTOM_ALLOWED_COLORS[0].hex;
+
+        const JALALI_MONTHS = ['فروردین','اردیبهشت','خرداد','تیر','مرداد','شهریور','مهر','آبان','آذر','دی','بهمن','اسفند'];
+        const WEEKDAY_NAMES = ['شنبه','یکشنبه','دوشنبه','سه‌شنبه','چهارشنبه','پنج‌شنبه','جمعه'];
+
+        // توابع تبدیل دقیقه به پیکسل و برعکس (با پله‌های رند ۱۵ دقیقه‌ای)
+        function minsToPx(mins) {
+            return (mins / 60) * hourHeightPx;
+        }
+        function pxToSnappedMins(px, snapStep = 15) {
+            const rawMins = (px / hourHeightPx) * 60;
+            const snapped = Math.round(rawMins / snapStep) * snapStep;
+            return Math.max(0, Math.min(1440, snapped));
+        }
+        function minsToTimeStr(totalMins) {
+            const clamped = Math.max(0, Math.min(1439, Math.round(totalMins)));
+            const h = Math.floor(clamped / 60);
+            const m = clamped % 60;
+            return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+        }
+        function timeStrToMins(tStr) {
+            const parts = String(tStr || '00:00').split(':').map(Number);
+            return (parts[0] * 60) + (parts[1] || 0);
+        }
+
+        function toggleCalendarRowZoom() {
+            hourHeightPx = (hourHeightPx === 60) ? 92 : 60;
+            const btn = document.getElementById('btn-grid-zoom');
+            if (btn) {
+                btn.innerHTML = (hourHeightPx === 92)
+                    ? '🔍 <span class="hidden lg:inline">نمای فشرده</span>'
+                    : '🔍 <span class="hidden lg:inline">نمای باز</span>';
+                btn.className = (hourHeightPx === 92)
+                    ? 'bg-indigo-100 text-indigo-700 border border-indigo-200 px-2 py-1.5 rounded-lg text-xs font-extrabold transition'
+                    : 'bg-slate-100 hover:bg-slate-200 text-slate-700 px-2 py-1.5 rounded-lg text-xs font-bold transition';
+            }
+            initTimeLabels();
+            renderCalendar();
+        }
+
+        // ====================================================
+        // مدیریت رابط کاربری اشتراک ویژه، لینک هوشمند تلگرام و کد فعال‌سازی
+        // ====================================================
+        function refreshSubscriptionUI() {
+            const headerBtn = document.getElementById('header-sub-btn');
+            if (headerBtn) {
+                if (userSub.is_vip) {
+                    headerBtn.className = 'bg-gradient-to-r from-amber-500 to-yellow-400 text-slate-950 px-2.5 py-1.5 rounded-lg font-extrabold flex items-center gap-1 shadow-xs transition';
+                    headerBtn.innerHTML = `<span>👑 ویژه (${userSub.days_left} روز | +تمدید)</span>`;
+                } else {
+                    headerBtn.className = 'bg-indigo-600 hover:bg-indigo-500 text-white border border-indigo-400 px-2.5 py-1.5 rounded-lg font-extrabold flex items-center gap-1 shadow-xs transition';
+                    headerBtn.innerHTML = `<span>⭐ ارتقا به اشتراک ویژه</span>`;
+                }
+            }
+
+            const quotaBanner = document.getElementById('pdf-quota-banner');
+            if (quotaBanner) {
+                if (userSub.is_vip) {
+                    quotaBanner.className = 'px-3 py-2 text-[11px] border-b border-emerald-200 flex items-center justify-between bg-emerald-50 text-emerald-900 font-bold';
+                    quotaBanner.innerHTML = `
+                        <span>👑 اشتراک ویژه فعال (${userSub.days_left} روز مانده)</span>
+                        <button type="button" onclick="openSubscriptionModal()" class="text-indigo-700 underline font-extrabold">+ تمدید</button>
+                    `;
+                } else {
+                    quotaBanner.className = 'px-3 py-2 text-[11px] border-b border-amber-200 flex items-center justify-between bg-amber-50 text-amber-900 font-bold';
+                    quotaBanner.innerHTML = `
+                        <span>👤 سهمیه عادی: ${pdfList.length} از ${FREE_MAX_PDF_CNT} فایل (سقف ${FREE_MAX_PDF_MB}MB)</span>
+                        <button type="button" onclick="openSubscriptionModal()" class="bg-indigo-600 text-white px-2 py-0.5 rounded-md font-extrabold text-[10px]">ارتقا 👑</button>
+                    `;
+                }
+            }
+
+            const smsLockBadge = document.getElementById('sms-vip-lock-badge');
+            const smsCheckbox  = document.getElementById('ev-send-sms');
+            if (smsLockBadge && smsCheckbox) {
+                if (userSub.is_vip) {
+                    smsLockBadge.classList.add('hidden');
+                } else {
+                    smsLockBadge.classList.remove('hidden');
+                    smsCheckbox.checked = false;
+                }
+            }
+
+            const phoneVipNotice = document.getElementById('phone-modal-vip-notice');
+            if (phoneVipNotice) {
+                if (userSub.is_vip) phoneVipNotice.classList.add('hidden');
+                else phoneVipNotice.classList.remove('hidden');
+            }
+        }
+
+        function openSubscriptionModal(reasonMessage = '') {
+            refreshSubscriptionUI();
+
+            const statusEl = document.getElementById('sub-modal-current-status');
+            if (userSub.is_vip) {
+                statusEl.innerHTML = `وضعیت فعلی شما: <b class="text-emerald-300">مشترک ویژه فعال (${userSub.days_left} روز باقی‌مانده - تا ${userSub.expires_j})</b> — با خرید مجدد، روزها به اعتبار فعلی شما اضافه می‌شوند.`;
+            } else {
+                statusEl.innerHTML = `وضعیت فعلی شما: <b class="text-amber-200">کاربر عادی (رایگان)</b> — حداکثر ۱ فایل PDF تا سقف ۳ مگابایت و بدون پیامک یادآوری.`;
+            }
+
+            const reasonBox = document.getElementById('sub-modal-reason-alert');
+            if (reasonMessage) {
+                reasonBox.textContent = '⚠️ ' + reasonMessage;
+                reasonBox.classList.remove('hidden');
+            } else {
+                reasonBox.classList.add('hidden');
+            }
+
+            const actionType = userSub.is_vip ? 'تمدید اشتراک' : 'خرید اشتراک';
+            const uName      = userSub.full_name || '';
+            const uId        = userSub.username || '';
+            const uPhone     = userSub.phone || document.getElementById('user-phone-input')?.value || 'ثبت‌نشده';
+
+            const msg1m = `سلام وقت بخیر، درخواست ${actionType} ویژه ۱ ماهه (۵۰۰,۰۰۰ تومان) را دارم.\n👤 نام: ${uName}\n🆔 نام کاربری در سایت: ${uId}\n📱 موبایل: ${uPhone}`;
+            const msg3m = `سلام وقت بخیر، درخواست ${actionType} ویژه ۳ ماهه (۱,۲۰۰,۰۰۰ تومان - با تخفیف) را دارم.\n👤 نام: ${uName}\n🆔 نام کاربری در سایت: ${uId}\n📱 موبایل: ${uPhone}`;
+
+            document.getElementById('tg-link-1m').href = `https://t.me/${TELEGRAM_SALES_ID}?text=${encodeURIComponent(msg1m)}`;
+            document.getElementById('tg-link-3m').href = `https://t.me/${TELEGRAM_SALES_ID}?text=${encodeURIComponent(msg3m)}`;
+
+            const m = document.getElementById('subscription-modal');
+            m.classList.remove('hidden');
+            m.classList.add('flex');
+        }
+
+        function closeSubscriptionModal() {
+            const m = document.getElementById('subscription-modal');
+            m.classList.add('hidden');
+            m.classList.remove('flex');
+        }
+
+        async function handleRedeemCode(e) {
+            e.preventDefault();
+            const codeInput = document.getElementById('redeem-code-input');
+            const btn = document.getElementById('btn-redeem-submit');
+            const code = codeInput.value.trim();
+            if (!code) return;
+
+            btn.disabled = true;
+            btn.textContent = '...';
+
+            try {
+                const fd = new FormData();
+                fd.append('action', 'redeem_code');
+                fd.append('code', code);
+
+                const res = await fetch('api/api_subscription.php', { method: 'POST', body: fd });
+                const data = await res.json();
+                alert(data.message);
+
+                if (data.status === 'success') {
+                    userSub = data.subscription;
+                    codeInput.value = '';
+                    refreshSubscriptionUI();
+                    closeSubscriptionModal();
+                    fetchUserPdfs();
+                }
+            } catch (err) {
+                alert('خطا در ارتباط با سرور.');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'فعال‌سازی';
+            }
+        }
+
+        function handleSmsCheckboxClick(e) {
+            if (!userSub.is_vip) {
+                e.preventDefault();
+                document.getElementById('ev-send-sms').checked = false;
+                openSubscriptionModal('قابلیت ارسال پیامک یادآوری خودکار مخصوص کاربران دارای اشتراک ویژه است.');
+            }
+        }
+
+        // ====================================================
+        // توابع تاریخ شمسی و تقویم
+        // ====================================================
+        function gregorianToJalali(gy, gm, gd) {
+            const g_d_m = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334];
+            const gy2 = (gm > 2) ? (gy + 1) : gy;
+            let days = 355666 + (365 * gy) + Math.floor((gy2 + 3) / 4) - Math.floor((gy2 + 99) / 100) + Math.floor((gy2 + 399) / 400) + gd + g_d_m[gm - 1];
+            let jy = -1595 + (33 * Math.floor(days / 12053));
+            days %= 12053;
+            jy += 4 * Math.floor(days / 1461);
+            days %= 1461;
+            if (days > 365) {
+                jy += Math.floor((days - 1) / 365);
+                days = (days - 1) % 365;
+            }
+            const jm = (days < 186) ? 1 + Math.floor(days / 31) : 7 + Math.floor((days - 186) / 30);
+            const jd = (days < 186) ? 1 + (days % 31) : 1 + ((days - 186) % 30);
+            return [jy, jm, jd];
+        }
+
+        function formatGDate(dateObj) {
+            return `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}-${String(dateObj.getDate()).padStart(2, '0')}`;
+        }
+
+        function getJalaliInfo(dateObj) {
+            const [jy, jm, jd] = gregorianToJalali(dateObj.getFullYear(), dateObj.getMonth() + 1, dateObj.getDate());
+            const iranianDayIdx = (dateObj.getDay() + 1) % 7;
+            return {
+                jy, jm, jd,
+                dayName: WEEKDAY_NAMES[iranianDayIdx],
+                monthName: JALALI_MONTHS[jm - 1]
+            };
+        }
+
+        function getFullWeekDays(refDate) {
+            const d = new Date(refDate);
+            const diffToSat = (d.getDay() + 1) % 7;
+            d.setDate(d.getDate() - diffToSat);
+            const week = [];
+            for (let i = 0; i < 7; i++) {
+                const clone = new Date(d);
+                clone.setDate(d.getDate() + i);
+                week.push(clone);
+            }
+            return week;
+        }
+
+        function computeVisibleDays() {
+            return viewMode === 'day' ? [new Date(anchorDate)] : getFullWeekDays(anchorDate);
+        }
+
+        function initTimeLabels() {
+            const col = document.getElementById('time-labels-col');
+            const gridEl = document.getElementById('calendar-grid-cols');
+            if (gridEl) gridEl.style.height = (24 * hourHeightPx) + 'px';
+
+            let html = '';
+            for (let h = 0; h < 24; h++) {
+                html += `<div style="height:${hourHeightPx}px" class="border-b border-slate-100 flex items-start justify-center pt-1">${String(h).padStart(2, '0')}:00</div>`;
+            }
+            col.innerHTML = html;
+        }
+
+        function isEventStudyType(ev) {
+            if (ev.is_study !== undefined && ev.is_study !== null) {
+                return Number(ev.is_study) === 1;
+            }
+            return ev.category_type !== 'misc' && String(ev.color).toLowerCase() !== '#7c3aed';
+        }
+
+        function initCustomColorPalette() {
+            const container = document.getElementById('custom-color-palette');
+            container.innerHTML = CUSTOM_ALLOWED_COLORS.map(c => `
+                <button type="button" onclick="selectCustomPaletteColor('${c.hex}')" data-hex="${c.hex}" title="${c.title}"
+                    class="custom-pal-btn w-6 h-6 rounded-full transition ${c.hex === selectedNewCatColor ? 'ring-2 ring-slate-900 scale-110' : 'opacity-65 hover:opacity-100'}"
+                    style="background-color:${c.hex}"></button>
+            `).join('');
+        }
+
+        function selectCustomPaletteColor(hex) {
+            selectedNewCatColor = hex;
+            initCustomColorPalette();
+        }
+
+        function toggleNewCategoryBox() {
+            const box = document.getElementById('new-category-box');
+            box.classList.toggle('hidden');
+            if (!box.classList.contains('hidden')) {
+                initCustomColorPalette();
+                document.getElementById('new-cat-name').focus();
+            }
+        }
+
+        function renderCategoryOptionsInModal(selectedColor = '#4f46e5') {
+            const grid = document.getElementById('event-categories-grid');
+            const normSelected = String(selectedColor).toLowerCase();
+            const allCats = [...DEFAULT_CATEGORIES, ...customCategories];
+
+            grid.innerHTML = allCats.map(cat => {
+                const isChecked = String(cat.color).toLowerCase() === normSelected;
+                const studyBadge = Number(cat.is_study) === 1 ? '📚' : '🧩';
+                const delBtn = cat.isDefault ? '' : `
+                    <span onclick="deleteCustomCategory(event, ${cat.id})" class="text-slate-400 hover:text-rose-600 font-extrabold px-1 mr-auto" title="حذف این نوع">&times;</span>
+                `;
+                return `
+                    <label class="flex items-center gap-1 cursor-pointer bg-slate-50 px-2 py-1.5 rounded-lg border hover:border-indigo-400 transition">
+                        <input type="radio" name="color" value="${cat.color}" ${isChecked ? 'checked' : ''}>
+                        <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background-color:${cat.color}"></span>
+                        <span class="text-[11px] font-bold truncate" title="${escapeHtml(cat.name)}">${escapeHtml(cat.name)}</span>
+                        <span class="text-[9px] opacity-75">${studyBadge}</span>
+                        ${delBtn}
+                    </label>
+                `;
+            }).join('');
+        }
+
+        async function saveNewCustomCategory() {
+            const nameInput = document.getElementById('new-cat-name');
+            const name = nameInput.value.trim();
+            const isStudy = document.getElementById('new-cat-is-study').value;
+
+            if (!name) {
+                alert('لطفاً نام نوع برنامه جدید را وارد کنید.');
+                return;
+            }
+
+            const fd = new FormData();
+            fd.append('action', 'create_category');
+            fd.append('name', name);
+            fd.append('color', selectedNewCatColor);
+            fd.append('is_study', isStudy);
+
+            const res = await fetch('api/api_calendar.php', { method: 'POST', body: fd });
+            const data = await res.json();
+            if (data.status === 'success') {
+                customCategories.push(data.category);
+                nameInput.value = '';
+                document.getElementById('new-category-box').classList.add('hidden');
+                renderCategoryOptionsInModal(data.category.color);
+            } else {
+                alert(data.message || 'خطا در ثبت نوع جدید');
+            }
+        }
+
+        async function deleteCustomCategory(e, catId) {
+            e.preventDefault();
+            e.stopPropagation();
+            if (!confirm('آیا این نوع سفارشی از لیست شما حذف شود؟')) return;
+
+            const fd = new FormData();
+            fd.append('action', 'delete_category');
+            fd.append('category_id', catId);
+
+            const res = await fetch('api/api_calendar.php', { method: 'POST', body: fd });
+            const data = await res.json();
+            if (data.status === 'success') {
+                customCategories = customCategories.filter(c => Number(c.id) !== Number(catId));
+                renderCategoryOptionsInModal('#4f46e5');
+            }
+        }
+
+        async function renderCalendar() {
+            const days = computeVisibleDays();
+            const fullWeek = getFullWeekDays(anchorDate);
+            const headerEl = document.getElementById('calendar-days-header');
+            const gridEl   = document.getElementById('calendar-grid-cols');
+            const stripEl  = document.getElementById('mobile-week-strip');
+
+            gridEl.style.height = (24 * hourHeightPx) + 'px';
+
+            document.getElementById('btn-view-week').className = viewMode === 'week'
+                ? 'px-2.5 py-1 rounded-md text-xs font-bold bg-white shadow-2xs text-indigo-600'
+                : 'px-2.5 py-1 rounded-md text-xs font-bold text-slate-600';
+            document.getElementById('btn-view-day').className = viewMode === 'day'
+                ? 'px-2.5 py-1 rounded-md text-xs font-bold bg-white shadow-2xs text-indigo-600'
+                : 'px-2.5 py-1 rounded-md text-xs font-bold text-slate-600';
+
+            if (viewMode === 'day') {
+                stripEl.classList.remove('hidden');
+                stripEl.classList.add('grid');
+                const activeG = formatGDate(anchorDate);
+                stripEl.innerHTML = fullWeek.map(wd => {
+                    const gStr = formatGDate(wd);
+                    const jInf = getJalaliInfo(wd);
+                    const isSelected = (gStr === activeG);
+                    const isLocked = (gStr > KONKUR_GREGORIAN);
+                    return `
+                        <button type="button" onclick="${isLocked ? '' : `selectDayForDailyView('${gStr}')`}" class="py-1.5 rounded-xl flex flex-col items-center justify-center transition ${isSelected ? 'bg-indigo-600 text-white shadow-xs' : 'bg-white text-slate-700 border border-slate-200'} ${isLocked ? 'opacity-40' : ''}">
+                            <span class="text-[10px] font-bold">${jInf.dayName.slice(0,1)}</span>
+                            <span class="text-xs font-extrabold mt-0.5">${jInf.jd}</span>
+                        </button>
+                    `;
+                }).join('');
+            } else {
+                stripEl.classList.add('hidden');
+                stripEl.classList.remove('grid');
+            }
+
+            const firstJ = getJalaliInfo(days[0]);
+            const lastJ  = getJalaliInfo(days[days.length - 1]);
+            document.getElementById('calendar-range-title').textContent = (viewMode === 'day')
+                ? `${firstJ.dayName} ${firstJ.jd} ${firstJ.monthName} ${firstJ.jy}`
+                : `${firstJ.jd} ${firstJ.monthName} تا ${lastJ.jd} ${lastJ.monthName}`;
+
+            const selectDateEl = document.getElementById('ev-date');
+            const copySrcEl    = document.getElementById('copy-source-date');
+            const copyDstEl    = document.getElementById('copy-target-date');
+            let dateOptsHtml = '';
+            fullWeek.forEach(wd => {
+                const gStr = formatGDate(wd);
+                if (gStr <= KONKUR_GREGORIAN) {
+                    const jInf = getJalaliInfo(wd);
+                    dateOptsHtml += `<option value="${gStr}">${jInf.dayName} ${jInf.jd} ${jInf.monthName}</option>`;
+                }
+            });
+            selectDateEl.innerHTML = dateOptsHtml;
+            if (copySrcEl) copySrcEl.innerHTML = dateOptsHtml;
+            if (copyDstEl) copyDstEl.innerHTML = dateOptsHtml;
+
+            try {
+                const startG = formatGDate(fullWeek[0]);
+                const endG   = formatGDate(fullWeek[6]);
+                const res    = await fetch(`api/api_calendar.php?action=list&start=${startG}&end=${endG}`);
+                const data   = await res.json();
+
+                if (data.status === 'success') {
+                    loadedEvents = data.events || [];
+                    overdueEvents = data.overdue_events || [];
+                    customCategories = data.custom_categories || [];
+                    calendarStats = data.stats || {};
+
+                    if (data.subscription) {
+                        userSub = data.subscription;
+                        refreshSubscriptionUI();
+                    }
+                    if (data.user_phone) {
+                        document.getElementById('user-phone-input').value = data.user_phone;
+                    }
+                    updateCalendarStatsBar(calendarStats);
+                    updateOverdueButtonUI();
+                }
+            } catch (err) {
+                console.error('Calendar fetch error:', err);
+            }
+
+            let headerHtml = '';
+            let gridHtml   = '';
+
+            days.forEach(dObj => {
+                const gStr = formatGDate(dObj);
+                const jInfo = getJalaliInfo(dObj);
+                const isToday = (gStr === TODAY_GREGORIAN);
+                const isKonkurDay = (gStr === KONKUR_GREGORIAN);
+                const isLocked = (gStr > KONKUR_GREGORIAN);
+
+                const dayStudyEvents = loadedEvents.filter(e => e.g_date === gStr && isEventStudyType(e));
+                let dayPlannedMins = 0;
+                let dayDoneMins = 0;
+                dayStudyEvents.forEach(e => {
+                    const dur = Math.max(0, timeStrToMins(e.end_time) - timeStrToMins(e.start_time));
+                    dayPlannedMins += dur;
+                    if (Number(e.is_completed) === 1) dayDoneMins += dur;
+                });
+                const dayPlannedH = +(dayPlannedMins / 60).toFixed(1);
+                const dayDoneH    = +(dayDoneMins / 60).toFixed(1);
+                const dayPct      = dayPlannedMins > 0 ? Math.round((dayDoneMins / dayPlannedMins) * 100) : 0;
+
+                let badgeHtml = '';
+                if (isKonkurDay) {
+                    badgeHtml = `<span class="block text-[9px] bg-rose-600 text-white px-1 rounded-full mt-0.5">🎯 کنکور</span>`;
+                } else if (isLocked) {
+                    badgeHtml = `<span class="block text-[9px] text-slate-400 mt-0.5">🔒 قفل</span>`;
+                } else if (dayPlannedH > 0) {
+                    badgeHtml = `
+                        <div class="mt-1 px-1">
+                            <div class="text-[9px] font-bold text-slate-600 truncate">📚${dayPlannedH}س | <span class="text-emerald-600">✅${dayDoneH}س</span></div>
+                            <div class="w-full h-1 bg-slate-200 rounded-full overflow-hidden mt-0.5">
+                                <div class="h-full bg-emerald-500" style="width:${dayPct}%"></div>
+                            </div>
+                        </div>
+                    `;
+                }
+
+                headerHtml += `
+                    <div onclick="selectDayForDailyView('${gStr}')" class="flex-1 py-1.5 px-1 text-center border-l border-slate-200 cursor-pointer hover:bg-slate-100 transition ${isToday ? 'bg-indigo-50/80' : ''}">
+                        <div class="text-[11px] font-bold ${isToday ? 'text-indigo-600' : 'text-slate-600'}">${jInfo.dayName}</div>
+                        <div class="inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-extrabold mt-0.5 ${isToday ? 'bg-indigo-600 text-white' : 'text-slate-800'}">
+                            ${jInfo.jd}
+                        </div>
+                        ${badgeHtml}
+                    </div>
+                `;
+
+                let hoursCells = '';
+                for (let h = 0; h < 24; h++) {
+                    hoursCells += `<div style="height:${hourHeightPx}px" class="border-b border-slate-100 ${isLocked ? '' : 'hover:bg-indigo-50/30'}"></div>`;
+                }
+
+                gridHtml += `
+                    <div class="day-column flex-1 border-l border-slate-200 relative ${isLocked ? 'locked-day-pattern' : 'cursor-crosshair'}" data-gdate="${gStr}" data-locked="${isLocked ? '1' : '0'}">
+                        ${hoursCells}
+                        <div class="events-layer absolute inset-0 pointer-events-none"></div>
+                    </div>
+                `;
+            });
+
+            headerEl.innerHTML = headerHtml;
+            gridEl.innerHTML   = gridHtml;
+
+            drawEventsOnGrid();
+            drawCurrentTimeIndicator();
+        }
+
+        function computeSideBySideLayout(dayEvents) {
+            const items = dayEvents.map(ev => {
+                const startMins = timeStrToMins(ev.start_time);
+                const endMins   = Math.max(startMins + 20, timeStrToMins(ev.end_time));
+                return { ev, startMins, endMins, colIdx: 0, totalCols: 1 };
+            });
+
+            items.sort((a, b) => (a.startMins - b.startMins) || (b.endMins - a.endMins));
+
+            let clusters = [];
+            let currentCluster = [];
+            let clusterMaxEnd = -1;
+
+            items.forEach(item => {
+                if (currentCluster.length === 0) {
+                    currentCluster.push(item);
+                    clusterMaxEnd = item.endMins;
+                } else if (item.startMins < clusterMaxEnd) {
+                    currentCluster.push(item);
+                    clusterMaxEnd = Math.max(clusterMaxEnd, item.endMins);
+                } else {
+                    clusters.push(currentCluster);
+                    currentCluster = [item];
+                    clusterMaxEnd = item.endMins;
+                }
+            });
+            if (currentCluster.length > 0) clusters.push(currentCluster);
+
+            clusters.forEach(cluster => {
+                const colLastEnd = [];
+                cluster.forEach(item => {
+                    let placedCol = -1;
+                    for (let c = 0; c < colLastEnd.length; c++) {
+                        if (colLastEnd[c] <= item.startMins) {
+                            placedCol = c;
+                            colLastEnd[c] = item.endMins;
+                            break;
+                        }
+                    }
+                    if (placedCol === -1) {
+                        placedCol = colLastEnd.length;
+                        colLastEnd.push(item.endMins);
+                    }
+                    item.colIdx = placedCol;
+                });
+
+                const totalCols = Math.max(1, colLastEnd.length);
+                cluster.forEach(item => {
+                    item.totalCols = totalCols;
+                });
+            });
+
+            return items;
+        }
+
+        function drawEventsOnGrid() {
+            const filtered = loadedEvents.filter(ev => {
+                if (calendarFilter === 'study') return isEventStudyType(ev);
+                if (calendarFilter === 'misc')  return !isEventStudyType(ev);
+                return true;
+            });
+
+            const byDate = {};
+            filtered.forEach(ev => {
+                if (!byDate[ev.g_date]) byDate[ev.g_date] = [];
+                byDate[ev.g_date].push(ev);
+            });
+
+            Object.keys(byDate).forEach(gDate => {
+                const dayCol = document.querySelector(`[data-gdate="${gDate}"] .events-layer`);
+                if (!dayCol) return;
+
+                const positionedItems = computeSideBySideLayout(byDate[gDate]);
+
+                positionedItems.forEach(({ ev, startMins, endMins, colIdx, totalCols }) => {
+                    const topPx      = minsToPx(startMins);
+                    const heightPx   = Math.max(24, minsToPx(endMins - startMins));
+                    const widthPct   = 100 / totalCols;
+                    const rightPct   = colIdx * widthPct;
+                    const isDone     = Number(ev.is_completed) === 1;
+
+                    const card = document.createElement('div');
+                    card.className = 'cal-event-card pointer-events-auto absolute rounded-lg p-1.5 pb-2.5 text-white shadow-md cursor-grab overflow-hidden flex flex-col justify-between border border-white/25';
+                    card.dataset.eventId   = String(ev.id);
+                    card.dataset.gdate     = ev.g_date;
+                    card.dataset.startMins = String(startMins);
+                    card.dataset.endMins   = String(endMins);
+
+                    card.style.top    = `${topPx}px`;
+                    card.style.height = `${heightPx}px`;
+                    card.style.right  = `calc(${rightPct}% + 2px)`;
+                    card.style.width  = `calc(${widthPct}% - 4px)`;
+                    card.style.zIndex = String(10 + colIdx);
+                    card.style.backgroundColor = ev.color || '#4f46e5';
+
+                    if (isDone) {
+                        card.style.opacity = '0.68';
+                    }
+
+                    const catLabel = ev.category_label ? `<span class="opacity-85 text-[9px]">[${escapeHtml(ev.category_label)}]</span> ` : '';
+
+                    let badgesHtml = '<div class="flex flex-wrap gap-1 mt-0.5">';
+                    if (ev.pdf_id) {
+                        badgesHtml += `<span class="bg-black/30 px-1 py-0.5 rounded text-[9px] font-bold">📖 ص${ev.pdf_page}</span>`;
+                    }
+                    if (ev.test_percent !== null && ev.test_percent !== undefined && ev.test_percent !== '') {
+                        badgesHtml += `<span class="bg-amber-300 text-slate-900 px-1 py-0.5 rounded text-[9px] font-extrabold">🎯${ev.test_percent}%</span>`;
+                    }
+                    badgesHtml += '</div>';
+
+                    card.innerHTML = `
+                        <div class="min-w-0">
+                            <div class="flex items-start justify-between gap-1">
+                                <div class="text-[10px] md:text-[11px] font-extrabold leading-tight truncate ${isDone ? 'line-through' : ''}" title="${escapeHtml(ev.title)}">
+                                    ${catLabel}${escapeHtml(ev.title)}
+                                </div>
+                                <button type="button" onclick="quickToggleEventComplete(event, ${ev.id})" class="quick-check-btn w-4 h-4 rounded-full border border-white/80 flex items-center justify-center text-[9px] shrink-0 ${isDone ? 'bg-emerald-500 text-white' : 'bg-black/20 hover:bg-white/30 text-transparent'}" title="تیک زدن سریع انجام کار">
+                                    ✓
+                                </button>
+                            </div>
+                            <div class="card-time-label text-[9px] opacity-95 font-mono mt-0.5" dir="ltr">${ev.start_time.slice(0,5)} - ${ev.end_time.slice(0,5)}</div>
+                        </div>
+                        ${badgesHtml}
+                        <div class="cal-resize-handle" title="برای تغییر ساعت پایان، به بالا یا پایین بکشید"></div>
+                    `;
+
+                    dayCol.appendChild(card);
+                });
+            });
+        }
+
+        // تیک زدن تک‌کلیکی انجام کار مستقیم روی کارت تقویم
+        async function quickToggleEventComplete(e, eventId) {
+            e.stopPropagation();
+            e.preventDefault();
+            const fd = new FormData();
+            fd.append('action', 'toggle_complete');
+            fd.append('id', eventId);
+            await fetch('api/api_calendar.php', { method: 'POST', body: fd });
+            renderCalendar();
+        }
+
+        // ====================================================
+        // موتور تعاملی تقویم: ۱. Drag & Drop تسک‌ها ۲. Resize لبه پایینی ۳. Drag-to-Create روی فضای خالی
+        // ====================================================
+        (function initInteractiveCalendarGrid() {
+            const scrollArea = document.getElementById('calendar-scroll-area');
+            const gridCols   = document.getElementById('calendar-grid-cols');
+            const statusPill = document.getElementById('live-drag-status-pill');
+
+            let interactionMode = null; // 'move' | 'resize' | 'create'
+            let activeCardEl    = null;
+            let activeEventObj  = null;
+            let ghostCreateEl   = null;
+
+            let startClientX = 0;
+            let startClientY = 0;
+            let initialStartMins = 0;
+            let initialEndMins   = 0;
+            let durationMins     = 60;
+            let currentTargetGDate = '';
+            let currentNewStartMins = 0;
+            let currentNewEndMins   = 0;
+
+            let hasMovedEnough = false;
+            let touchHoldTimer = null;
+            let autoScrollInterval = null;
+
+            function getPointCoords(e) {
+                if (e.touches && e.touches.length > 0) {
+                    return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+                }
+                if (e.changedTouches && e.changedTouches.length > 0) {
+                    return { x: e.changedTouches[0].clientX, y: e.changedTouches[0].clientY };
+                }
+                return { x: e.clientX, y: e.clientY };
+            }
+
+            function findDayColumnAtX(clientX) {
+                const cols = Array.from(gridCols.querySelectorAll('.day-column'));
+                for (const col of cols) {
+                    const r = col.getBoundingClientRect();
+                    if (clientX >= r.left && clientX <= r.right) {
+                        return col;
+                    }
+                }
+                return null;
+            }
+
+            function getMinutesAtClientY(clientY) {
+                const gridRect = gridCols.getBoundingClientRect();
+                const relY     = clientY - gridRect.top;
+                return pxToSnappedMins(relY, 15);
+            }
+
+            function showDragStatus(text) {
+                if (!statusPill) return;
+                statusPill.textContent = text;
+                statusPill.classList.remove('hidden');
+            }
+
+            function hideDragStatus() {
+                if (!statusPill) return;
+                statusPill.classList.add('hidden');
+            }
+
+            // اسکرول خودکار صفحه وقتی کاربر کارت را به لبه بالا یا پایین تقویم نزدیک می‌کند
+            function handleAutoEdgeScroll(clientY) {
+                const rect = scrollArea.getBoundingClientRect();
+                const edgeZone = 48;
+                if (autoScrollInterval) {
+                    clearInterval(autoScrollInterval);
+                    autoScrollInterval = null;
+                }
+                if (clientY < rect.top + edgeZone) {
+                    autoScrollInterval = setInterval(() => { scrollArea.scrollTop -= 12; }, 25);
+                } else if (clientY > rect.bottom - edgeZone) {
+                    autoScrollInterval = setInterval(() => { scrollArea.scrollTop += 12; }, 25);
+                }
+            }
+
+            function stopAutoEdgeScroll() {
+                if (autoScrollInterval) {
+                    clearInterval(autoScrollInterval);
+                    autoScrollInterval = null;
+                }
+            }
+
+            function beginCardMoveOrResize(mode, cardEl, pt) {
+                const evId = Number(cardEl.dataset.eventId);
+                activeEventObj = loadedEvents.find(x => Number(x.id) === evId);
+                if (!activeEventObj) return;
+
+                interactionMode     = mode;
+                activeCardEl        = cardEl;
+                startClientX        = pt.x;
+                startClientY        = pt.y;
+                initialStartMins    = Number(cardEl.dataset.startMins);
+                initialEndMins      = Number(cardEl.dataset.endMins);
+                durationMins        = Math.max(15, initialEndMins - initialStartMins);
+                currentTargetGDate  = cardEl.dataset.gdate;
+                currentNewStartMins = initialStartMins;
+                currentNewEndMins   = initialEndMins;
+                hasMovedEnough      = false;
+
+                cardEl.classList.add('dragging-active');
+                showDragStatus(mode === 'resize'
+                    ? `↕️ تغییر ساعت پایان: ${minsToTimeStr(currentNewStartMins)} - ${minsToTimeStr(currentNewEndMins)}`
+                    : `✋ جابه‌جایی: ${minsToTimeStr(currentNewStartMins)} - ${minsToTimeStr(currentNewEndMins)}`
+                );
+            }
+
+            function beginCreateSelection(dayCol, pt) {
+                if (dayCol.dataset.locked === '1') return;
+                interactionMode     = 'create';
+                currentTargetGDate  = dayCol.dataset.gdate;
+                startClientX        = pt.x;
+                startClientY        = pt.y;
+                initialStartMins    = Math.min(1410, getMinutesAtClientY(pt.y));
+                currentNewStartMins = initialStartMins;
+                currentNewEndMins   = Math.min(1440, initialStartMins + 60);
+                hasMovedEnough      = false;
+
+                if (ghostCreateEl) ghostCreateEl.remove();
+                ghostCreateEl = document.createElement('div');
+                ghostCreateEl.className = 'drag-create-ghost';
+                dayCol.appendChild(ghostCreateEl);
+                updateGhostCreateBox();
+            }
+
+            function updateGhostCreateBox() {
+                if (!ghostCreateEl) return;
+                const sM = Math.min(currentNewStartMins, currentNewEndMins);
+                const eM = Math.max(sM + 15, Math.max(currentNewStartMins, currentNewEndMins));
+                const durH = +((eM - sM) / 60).toFixed(2);
+
+                ghostCreateEl.style.top    = `${minsToPx(sM)}px`;
+                ghostCreateEl.style.height = `${Math.max(22, minsToPx(eM - sM))}px`;
+                ghostCreateEl.innerHTML    = `<span>🕒 ${minsToTimeStr(sM)} تا ${minsToTimeStr(eM)} (${durH} ساعت)</span>`;
+                showDragStatus(`➕ انتخاب بازه جدید: ${minsToTimeStr(sM)} تا ${minsToTimeStr(eM)}`);
+            }
+
+            function onPointerMove(e) {
+                const pt = getPointCoords(e);
+
+                // اگر هنوز تایمر لمس طولانی موبایل فعال است و کاربر انگشتش را برای اسکرول تکان داد، تایمر لغو شود تا صفحه راحت اسکرول شود
+                if (touchHoldTimer && Math.hypot(pt.x - startClientX, pt.y - startClientY) > 10) {
+                    clearTimeout(touchHoldTimer);
+                    touchHoldTimer = null;
+                }
+
+                if (!interactionMode) return;
+                if (e.cancelable) e.preventDefault();
+
+                if (Math.hypot(pt.x - startClientX, pt.y - startClientY) > 5) {
+                    hasMovedEnough = true;
+                }
+
+                handleAutoEdgeScroll(pt.y);
+
+                if (interactionMode === 'move' && activeCardEl) {
+                    const deltaPx   = pt.y - startClientY;
+                    const deltaMins = Math.round(((deltaPx / hourHeightPx) * 60) / 15) * 15;
+
+                    let nextStart = Math.max(0, Math.min(1440 - durationMins, initialStartMins + deltaMins));
+                    let nextEnd   = nextStart + durationMins;
+
+                    currentNewStartMins = nextStart;
+                    currentNewEndMins   = nextEnd;
+
+                    activeCardEl.style.top = `${minsToPx(nextStart)}px`;
+                    const timeLbl = activeCardEl.querySelector('.card-time-label');
+                    if (timeLbl) {
+                        timeLbl.textContent = `${minsToTimeStr(nextStart)} - ${minsToTimeStr(nextEnd)}`;
+                    }
+
+                    // بررسی انتقال کارت به ستون روز دیگر در نمای هفتگی
+                    const targetCol = findDayColumnAtX(pt.x);
+                    if (targetCol && targetCol.dataset.locked !== '1') {
+                        const newGDate = targetCol.dataset.gdate;
+                        if (newGDate && newGDate !== currentTargetGDate) {
+                            currentTargetGDate = newGDate;
+                            const layer = targetCol.querySelector('.events-layer');
+                            if (layer && activeCardEl.parentElement !== layer) {
+                                layer.appendChild(activeCardEl);
+                            }
+                        }
+                    }
+
+                    showDragStatus(`✋ انتقال به: ${minsToTimeStr(nextStart)} تا ${minsToTimeStr(nextEnd)}`);
+                } else if (interactionMode === 'resize' && activeCardEl) {
+                    const curMins = getMinutesAtClientY(pt.y);
+                    const nextEnd = Math.max(initialStartMins + 15, Math.min(1440, curMins));
+                    currentNewEndMins = nextEnd;
+
+                    activeCardEl.style.height = `${Math.max(22, minsToPx(nextEnd - initialStartMins))}px`;
+                    const timeLbl = activeCardEl.querySelector('.card-time-label');
+                    if (timeLbl) {
+                        timeLbl.textContent = `${minsToTimeStr(initialStartMins)} - ${minsToTimeStr(nextEnd)}`;
+                    }
+                    showDragStatus(`↕️ ساعت پایان جدید: ${minsToTimeStr(initialStartMins)} تا ${minsToTimeStr(nextEnd)}`);
+                } else if (interactionMode === 'create') {
+                    const curMins = getMinutesAtClientY(pt.y);
+                    if (Math.abs(curMins - initialStartMins) >= 15) {
+                        currentNewEndMins = curMins;
+                    } else {
+                        currentNewEndMins = Math.min(1440, initialStartMins + 60);
+                    }
+                    updateGhostCreateBox();
+                }
+            }
+
+            async function onPointerUp() {
+                if (touchHoldTimer) {
+                    clearTimeout(touchHoldTimer);
+                    touchHoldTimer = null;
+                }
+                stopAutoEdgeScroll();
+                hideDragStatus();
+
+                if (!interactionMode) return;
+
+                const finishedMode = interactionMode;
+                interactionMode = null;
+
+                if (finishedMode === 'move' || finishedMode === 'resize') {
+                    if (activeCardEl) activeCardEl.classList.remove('dragging-active');
+
+                    // اگر کاربر در دسکتاپ فقط روی کارت کلیک کرده و آن را نکشیده است، پنجره ویرایش باز شود
+                    if (!hasMovedEnough && activeEventObj) {
+                        const evToEdit = activeEventObj;
+                        activeCardEl = null;
+                        activeEventObj = null;
+                        openEventModalForEdit(evToEdit);
+                        return;
+                    }
+
+                    if (activeEventObj) {
+                        const fd = new FormData();
+                        fd.append('action', 'move_resize');
+                        fd.append('id', activeEventObj.id);
+                        fd.append('g_date', currentTargetGDate);
+                        fd.append('start_time', minsToTimeStr(currentNewStartMins));
+                        fd.append('end_time', minsToTimeStr(currentNewEndMins === 1440 ? 1439 : currentNewEndMins));
+
+                        activeCardEl = null;
+                        activeEventObj = null;
+                        await fetch('api/api_calendar.php', { method: 'POST', body: fd });
+                        renderCalendar();
+                    }
+                } else if (finishedMode === 'create') {
+                    if (ghostCreateEl) {
+                        ghostCreateEl.remove();
+                        ghostCreateEl = null;
+                    }
+                    const sM = Math.min(currentNewStartMins, currentNewEndMins);
+                    let eM   = Math.max(currentNewStartMins, currentNewEndMins);
+                    if (!hasMovedEnough || eM - sM < 15) {
+                        eM = Math.min(1439, sM + 60);
+                    } else if (eM >= 1440) {
+                        eM = 1439;
+                    }
+                    openEventModal(currentTargetGDate, minsToTimeStr(sM), minsToTimeStr(eM));
+                }
+            }
+
+            // ۱. رویدادهای موس (دسکتاپ)
+            gridCols.addEventListener('mousedown', (e) => {
+                if (e.button !== 0) return;
+                if (e.target.closest('.quick-check-btn')) return;
+
+                const pt = getPointCoords(e);
+                const resizeHandle = e.target.closest('.cal-resize-handle');
+                const cardEl       = e.target.closest('.cal-event-card');
+
+                if (resizeHandle && cardEl) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    beginCardMoveOrResize('resize', cardEl, pt);
+                } else if (cardEl) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    beginCardMoveOrResize('move', cardEl, pt);
+                } else {
+                    const dayCol = e.target.closest('.day-column');
+                    if (dayCol && dayCol.dataset.locked !== '1') {
+                        e.preventDefault();
+                        beginCreateSelection(dayCol, pt);
+                    }
+                }
+            });
+
+            window.addEventListener('mousemove', onPointerMove, { passive: false });
+            window.addEventListener('mouseup', onPointerUp);
+
+            // ۲. رویدادهای لمسی (موبایل و تبلت)
+            gridCols.addEventListener('touchstart', (e) => {
+                if (e.touches.length !== 1) return;
+                if (e.target.closest('.quick-check-btn')) return;
+
+                const pt = getPointCoords(e);
+                startClientX = pt.x;
+                startClientY = pt.y;
+
+                const resizeHandle = e.target.closest('.cal-resize-handle');
+                const cardEl       = e.target.closest('.cal-event-card');
+                const dayCol       = e.target.closest('.day-column');
+
+                if (resizeHandle && cardEl) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (navigator.vibrate) navigator.vibrate(20);
+                    beginCardMoveOrResize('resize', cardEl, pt);
+                } else if (cardEl) {
+                    // نگه‌داشتن کوتاه انگشت (190ms) روی کارت در موبایل برای شروع جابه‌جایی (Drag)
+                    touchHoldTimer = setTimeout(() => {
+                        touchHoldTimer = null;
+                        if (navigator.vibrate) navigator.vibrate(25);
+                        beginCardMoveOrResize('move', cardEl, pt);
+                    }, 190);
+                } else if (dayCol && dayCol.dataset.locked !== '1') {
+                    // نگه‌داشتن کوتاه انگشت روی فضای خالی در موبایل برای کشیدن بازه زمانی دلخواه
+                    touchHoldTimer = setTimeout(() => {
+                        touchHoldTimer = null;
+                        if (navigator.vibrate) navigator.vibrate(25);
+                        beginCreateSelection(dayCol, pt);
+                    }, 210);
+                }
+            }, { passive: false });
+
+            window.addEventListener('touchmove', onPointerMove, { passive: false });
+
+            gridCols.addEventListener('touchend', (e) => {
+                // اگر کاربر در موبایل بدون نگه‌داشتن طولانی، یک ضربه سریع (Tap) روی کارت یا ردیف خالی زد
+                if (touchHoldTimer) {
+                    clearTimeout(touchHoldTimer);
+                    touchHoldTimer = null;
+                    const pt = getPointCoords(e);
+                    if (Math.hypot(pt.x - startClientX, pt.y - startClientY) < 10) {
+                        const cardEl = e.target.closest('.cal-event-card');
+                        if (cardEl) {
+                            const evId = Number(cardEl.dataset.eventId);
+                            const evObj = loadedEvents.find(x => Number(x.id) === evId);
+                            if (evObj) openEventModalForEdit(evObj);
+                        } else {
+                            const dayCol = e.target.closest('.day-column');
+                            if (dayCol && dayCol.dataset.locked !== '1') {
+                                const sM = Math.min(1380, getMinutesAtClientY(pt.y));
+                                openEventModal(dayCol.dataset.gdate, minsToTimeStr(sM), minsToTimeStr(sM + 60));
+                            }
+                        }
+                    }
+                    return;
+                }
+                onPointerUp();
+            });
+        })();
+
+        // ====================================================
+        // مودال کارنامه تحلیلی هفته و مودال برنامه‌های عقب‌افتاده
+        // ====================================================
+        function updateOverdueButtonUI() {
+            const btn   = document.getElementById('btn-overdue-backlog');
+            const badge = document.getElementById('overdue-count-badge');
+            if (!btn || !badge) return;
+
+            if (overdueEvents.length > 0) {
+                badge.textContent = overdueEvents.length;
+                btn.classList.remove('hidden');
+                btn.classList.add('flex');
+            } else {
+                btn.classList.add('hidden');
+                btn.classList.remove('flex');
+            }
+        }
+
+        function openOverdueModal() {
+            const container = document.getElementById('overdue-list-container');
+            if (overdueEvents.length === 0) {
+                container.innerHTML = `<div class="text-center text-slate-400 py-8">🎉 هیچ برنامه درسی عقب‌افتاده‌ای ندارید!</div>`;
+            } else {
+                container.innerHTML = overdueEvents.map(ev => `
+                    <div class="p-3 bg-slate-50 border border-slate-200 rounded-xl flex flex-col gap-2">
+                        <div class="flex items-start justify-between gap-2">
+                            <div class="min-w-0">
+                                <span class="inline-block w-2.5 h-2.5 rounded-full ml-1" style="background:${ev.color}"></span>
+                                <span class="font-extrabold text-slate-800">${escapeHtml(ev.title)}</span>
+                                <div class="text-[10px] text-slate-500 mt-0.5">📅 تاریخ: ${ev.j_date} | 🕒 ساعت ${ev.start_time.slice(0,5)} تا ${ev.end_time.slice(0,5)}</div>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-3 gap-1.5 pt-1 border-t border-slate-200/70">
+                            <button type="button" onclick="quickCompleteOverdueItem(${ev.id})" class="py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold text-[10px]">
+                                ✅ انجام شد
+                            </button>
+                            <button type="button" onclick="moveOverdueItemToDate(${ev.id}, '${TODAY_GREGORIAN}')" class="py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg font-bold text-[10px]">
+                                📅 انتقال به امروز
+                            </button>
+                            <button type="button" onclick="moveOverdueItemToTomorrow(${ev.id})" class="py-1.5 bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-200 rounded-lg font-bold text-[10px]">
+                                ⏭️ انتقال به فردا
+                            </button>
+                        </div>
+                    </div>
+                `).join('');
+            }
+            const m = document.getElementById('overdue-modal');
+            m.classList.remove('hidden');
+            m.classList.add('flex');
+        }
+
+        function closeOverdueModal() {
+            const m = document.getElementById('overdue-modal');
+            m.classList.add('hidden');
+            m.classList.remove('flex');
+        }
+
+        async function quickCompleteOverdueItem(id) {
+            const fd = new FormData();
+            fd.append('action', 'toggle_complete');
+            fd.append('id', id);
+            await fetch('api/api_calendar.php', { method: 'POST', body: fd });
+            await renderCalendar();
+            openOverdueModal();
+        }
+
+        async function moveOverdueItemToDate(id, targetGDate) {
+            const fd = new FormData();
+            fd.append('action', 'move_to_date');
+            fd.append('id', id);
+            fd.append('target_date', targetGDate);
+            await fetch('api/api_calendar.php', { method: 'POST', body: fd });
+            await renderCalendar();
+            openOverdueModal();
+        }
+
+        async function moveOverdueItemToTomorrow(id) {
+            const tomorrow = new Date(TODAY_GREGORIAN + 'T00:00:00');
+            tomorrow.setDate(tomorrow.getDate() + 1);
+            await moveOverdueItemToDate(id, formatGDate(tomorrow));
+        }
+
+        function openAnalyticsModal() {
+            const fullWeek = getFullWeekDays(anchorDate);
+            const plannedH = calendarStats.planned_hours || 0;
+            const doneH    = calendarStats.completed_hours || 0;
+            const effPct   = plannedH > 0 ? Math.round((doneH / plannedH) * 100) : 0;
+
+            document.getElementById('an-total-planned').textContent = `${plannedH} ساعت`;
+            document.getElementById('an-total-done').textContent    = `${doneH} ساعت`;
+            document.getElementById('an-efficiency').textContent    = `${effPct}%`;
+
+            // ۱. رسم نمودار میله‌ای ۷ روز هفته
+            let maxDayH = 1;
+            const dayMetrics = fullWeek.map(wd => {
+                const gStr = formatGDate(wd);
+                const jInf = getJalaliInfo(wd);
+                const evs  = loadedEvents.filter(e => e.g_date === gStr && isEventStudyType(e));
+                let pMins = 0, dMins = 0;
+                evs.forEach(e => {
+                    const dur = Math.max(0, timeStrToMins(e.end_time) - timeStrToMins(e.start_time));
+                    pMins += dur;
+                    if (Number(e.is_completed) === 1) dMins += dur;
+                });
+                const pH = +(pMins / 60).toFixed(1);
+                const dH = +(dMins / 60).toFixed(1);
+                if (pH > maxDayH) maxDayH = pH;
+                return { dayName: jInf.dayName, jd: jInf.jd, pH, dH };
+            });
+
+            document.getElementById('an-daily-bars').innerHTML = dayMetrics.map(dm => {
+                const pHeightPct = Math.round((dm.pH / maxDayH) * 100);
+                const dHeightPct = Math.round((dm.dH / maxDayH) * 100);
+                return `
+                    <div class="flex flex-col items-center h-full justify-end">
+                        <div class="text-[9px] font-bold text-emerald-700 mb-1">${dm.dH}س</div>
+                        <div class="w-full max-w-[26px] bg-slate-200 rounded-t-lg relative overflow-hidden flex items-end" style="height:${Math.max(8, pHeightPct)}%">
+                            <div class="w-full bg-emerald-500 rounded-t-lg transition-all" style="height:${dm.pH > 0 ? Math.round((dm.dH / dm.pH) * 100) : 0}%"></div>
+                        </div>
+                        <div class="text-[10px] font-extrabold text-slate-700 mt-1 truncate">${dm.dayName.slice(0,3)}</div>
+                    </div>
+                `;
+            }).join('');
+
+            // ۲. تفکیک ساعات بر اساس نوع / دسته‌بندی
+            const catMap = {};
+            loadedEvents.forEach(ev => {
+                const label = ev.category_label || 'تخصصی';
+                const color = ev.color || '#4f46e5';
+                const dur   = Math.max(0, timeStrToMins(ev.end_time) - timeStrToMins(ev.start_time));
+                if (!catMap[label]) catMap[label] = { label, color, plannedMins: 0, doneMins: 0 };
+                catMap[label].plannedMins += dur;
+                if (Number(ev.is_completed) === 1) catMap[label].doneMins += dur;
+            });
+
+            const catArr = Object.values(catMap).sort((a, b) => b.plannedMins - a.plannedMins);
+            const catContainer = document.getElementById('an-category-breakdown');
+            if (catArr.length === 0) {
+                catContainer.innerHTML = `<div class="text-center text-slate-400 py-4">در این هفته هنوز برنامه‌ای ثبت نشده است.</div>`;
+            } else {
+                catContainer.innerHTML = catArr.map(c => {
+                    const pH  = +(c.plannedMins / 60).toFixed(1);
+                    const dH  = +(c.doneMins / 60).toFixed(1);
+                    const pct = c.plannedMins > 0 ? Math.round((c.doneMins / c.plannedMins) * 100) : 0;
+                    return `
+                        <div class="bg-white p-2.5 rounded-xl border border-slate-200 space-y-1">
+                            <div class="flex items-center justify-between text-[11px] font-bold">
+                                <div class="flex items-center gap-1.5">
+                                    <span class="w-3 h-3 rounded-full" style="background:${c.color}"></span>
+                                    <span>${escapeHtml(c.label)}</span>
+                                </div>
+                                <span class="text-slate-600">انجام‌شده: <b class="text-emerald-600">${dH} ساعت</b> از ${pH} ساعت (${pct}%)</span>
+                            </div>
+                            <div class="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                <div class="h-full rounded-full" style="width:${pct}%; background:${c.color}"></div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            }
+
+            const m = document.getElementById('analytics-modal');
+            m.classList.remove('hidden');
+            m.classList.add('flex');
+        }
+
+        function closeAnalyticsModal() {
+            const m = document.getElementById('analytics-modal');
+            m.classList.add('hidden');
+            m.classList.remove('flex');
+        }
+
+        // ====================================================
+        // سایر کنترل‌های تقویم
+        // ====================================================
+        function setCalendarFilter(filter) {
+            calendarFilter = filter;
+            ['all', 'study', 'misc'].forEach(f => {
+                const btn = document.getElementById('filter-' + f);
+                if (btn) {
+                    btn.className = (f === filter)
+                        ? 'px-2 py-1 rounded-md font-bold bg-white shadow-2xs text-indigo-600'
+                        : 'px-2 py-1 rounded-md font-bold text-slate-600';
+                }
+            });
+            document.querySelectorAll('.events-layer').forEach(el => el.innerHTML = '');
+            drawEventsOnGrid();
+            drawCurrentTimeIndicator();
+        }
+
+        function drawCurrentTimeIndicator() {
+            const todayCol = document.querySelector(`[data-gdate="${TODAY_GREGORIAN}"] .events-layer`);
+            if (!todayCol) return;
+            const now = new Date();
+            const mins = (now.getHours() * 60) + now.getMinutes();
+            const line = document.createElement('div');
+            line.className = 'absolute right-0 left-0 border-t-2 border-rose-500 z-20 pointer-events-none flex items-center';
+            line.style.top = `${minsToPx(mins)}px`;
+            line.innerHTML = `<span class="w-2.5 h-2.5 rounded-full bg-rose-500 -mr-1.5"></span>`;
+            todayCol.appendChild(line);
+        }
+
+        function updateCalendarStatsBar(stats) {
+            const studyTotal = stats.study_total !== undefined ? stats.study_total : (stats.total || 0);
+            const studyComp  = stats.study_completed !== undefined ? stats.study_completed : (stats.completed || 0);
+            const pct        = studyTotal > 0 ? Math.round((studyComp / studyTotal) * 100) : 0;
+
+            document.getElementById('stat-progress-text').textContent = `${pct}% (${studyComp}/${studyTotal})`;
+            document.getElementById('stat-planned-hours').textContent = `${stats.planned_hours || 0} ساعت`;
+            document.getElementById('stat-completed-hours').textContent = `${stats.completed_hours || 0} ساعت`;
+            document.getElementById('stat-misc-hours').textContent = `${stats.misc_completed_hours || 0} از ${stats.misc_planned_hours || 0} ساعت`;
+            document.getElementById('stat-avg-percent').textContent = (stats.avg_test_percent !== null && stats.avg_test_percent !== undefined) ? `${stats.avg_test_percent}%` : '---';
+        }
+
+        function navigateCalendar(dir) {
+            const step = (viewMode === 'week') ? 7 : 1;
+            const nextDate = new Date(anchorDate);
+            nextDate.setDate(nextDate.getDate() + (dir * step));
+            if (dir > 0 && formatGDate(nextDate) > KONKUR_GREGORIAN && formatGDate(anchorDate) >= KONKUR_GREGORIAN) {
+                alert('تقویم در تاریخ ۱۶ بهمن (روز کنکور) به پایان می‌رسد.');
+                return;
+            }
+            anchorDate = nextDate;
+            renderCalendar();
+        }
+
+        function goToToday() {
+            anchorDate = new Date(TODAY_GREGORIAN + 'T00:00:00');
+            renderCalendar();
+        }
+
+        function setViewMode(mode) {
+            viewMode = mode;
+            renderCalendar();
+        }
+
+        function selectDayForDailyView(gDateStr) {
+            anchorDate = new Date(gDateStr + 'T00:00:00');
+            viewMode = 'day';
+            renderCalendar();
+        }
+
+        function updateLiveTestPercent() {
+            const cVal = document.getElementById('ev-test-correct').value;
+            const wVal = document.getElementById('ev-test-wrong').value;
+            const bVal = document.getElementById('ev-test-blank').value;
+            const badge = document.getElementById('live-test-percent-badge');
+
+            if (cVal === '' && wVal === '' && bVal === '') {
+                badge.textContent = '---';
+                return;
+            }
+            const c = Math.max(0, parseInt(cVal) || 0);
+            const w = Math.max(0, parseInt(wVal) || 0);
+            const b = Math.max(0, parseInt(bVal) || 0);
+            const total = c + w + b;
+            if (total <= 0) {
+                badge.textContent = '---';
+                return;
+            }
+            const pct = (((c * 3) - w) / (total * 3)) * 100;
+            badge.textContent = `درصد: ${pct.toFixed(1)}%`;
+        }
+
+        function checkLiveOverlapWarning() {
+            const warnBox = document.getElementById('overlap-warning-box');
+            const gDate   = document.getElementById('ev-date').value;
+            const start   = document.getElementById('ev-start').value;
+            const end     = document.getElementById('ev-end').value;
+            const curId   = Number(document.getElementById('ev-id').value || 0);
+
+            if (!gDate || !start || !end || end <= start) {
+                warnBox.classList.add('hidden');
+                return;
+            }
+
+            const sMins = timeStrToMins(start);
+            const eMins = timeStrToMins(end);
+
+            const conflicts = loadedEvents.filter(ev => {
+                if (ev.g_date !== gDate || Number(ev.id) === curId) return false;
+                const evS = timeStrToMins(ev.start_time);
+                const evE = timeStrToMins(ev.end_time);
+                return (sMins < evE && eMins > evS);
+            });
+
+            if (conflicts.length > 0) {
+                const names = conflicts.map(c => `«${c.title} (${c.start_time.slice(0,5)}-${c.end_time.slice(0,5)})»`).join(' و ');
+                warnBox.textContent = `💡 توجه: این ساعت با برنامه ${names} همپوشانی دارد (در تقویم کنار هم نمایش داده می‌شوند).`;
+                warnBox.classList.remove('hidden');
+            } else {
+                warnBox.classList.add('hidden');
+            }
+        }
+
+        function openEventModal(gDate = null, startTime = '08:00', endTime = '09:30') {
+            document.getElementById('event-form').reset();
+            document.getElementById('ev-id').value = '';
+            document.getElementById('modal-title').textContent = 'ثبت برنامه جدید در تقویم';
+            document.getElementById('repeat-mode-wrapper').classList.remove('hidden');
+            document.getElementById('edit-extra-actions').classList.add('hidden');
+            document.getElementById('new-category-box').classList.add('hidden');
+            document.getElementById('live-test-percent-badge').textContent = '---';
+
+            const targetDate = gDate || formatGDate(anchorDate);
+            if (targetDate > KONKUR_GREGORIAN) {
+                alert('امکان ثبت برنامه پس از ۱۶ بهمن وجود ندارد.');
+                return;
+            }
+            document.getElementById('ev-date').value = targetDate;
+            document.getElementById('ev-start').value = startTime;
+            document.getElementById('ev-end').value = endTime;
+
+            // تیک ارسال پیامک یادآوری به صورت پیش‌فرض برای همه غیرفعال (خاموش) است
+            document.getElementById('ev-send-sms').checked = false;
+            refreshSubscriptionUI();
+
+            renderCategoryOptionsInModal('#4f46e5');
+            checkLiveOverlapWarning();
+
+            document.getElementById('btn-delete-event').classList.add('hidden');
+            document.getElementById('btn-toggle-complete').classList.add('hidden');
+            document.getElementById('btn-open-linked-pdf').classList.add('hidden');
+
+            const modal = document.getElementById('event-modal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function openEventModalForEdit(ev) {
+            document.getElementById('ev-id').value = ev.id;
+            document.getElementById('ev-title').value = ev.title;
+            document.getElementById('ev-date').value = ev.g_date;
+            document.getElementById('ev-start').value = ev.start_time.slice(0, 5);
+            document.getElementById('ev-end').value = ev.end_time.slice(0, 5);
+            document.getElementById('ev-desc').value = ev.description || '';
+            document.getElementById('ev-pdf-id').value = ev.pdf_id || '';
+            document.getElementById('ev-pdf-page').value = ev.pdf_page || 1;
+            document.getElementById('ev-send-sms').checked = userSub.is_vip && (Number(ev.send_sms ?? 0) === 1);
+            refreshSubscriptionUI();
+
+            document.getElementById('ev-test-correct').value = (ev.test_correct !== null && ev.test_correct !== undefined) ? ev.test_correct : '';
+            document.getElementById('ev-test-wrong').value   = (ev.test_wrong !== null && ev.test_wrong !== undefined) ? ev.test_wrong : '';
+            document.getElementById('ev-test-blank').value   = (ev.test_blank !== null && ev.test_blank !== undefined) ? ev.test_blank : '';
+            updateLiveTestPercent();
+
+            document.getElementById('repeat-mode-wrapper').classList.add('hidden');
+            document.getElementById('new-category-box').classList.add('hidden');
+            document.getElementById('edit-extra-actions').classList.remove('hidden');
+
+            renderCategoryOptionsInModal(ev.color || '#4f46e5');
+            checkLiveOverlapWarning();
+
+            document.getElementById('modal-title').textContent = 'ویرایش برنامه و ثبت عملکرد';
+            document.getElementById('btn-delete-event').classList.remove('hidden');
+            const btnComplete = document.getElementById('btn-toggle-complete');
+            btnComplete.classList.remove('hidden');
+            btnComplete.textContent = Number(ev.is_completed) === 1 ? '↩ لغو تیک انجام' : '✓ ثبت انجام کار';
+
+            const btnOpenPdf = document.getElementById('btn-open-linked-pdf');
+            if (ev.pdf_id) {
+                btnOpenPdf.classList.remove('hidden');
+                btnOpenPdf.onclick = () => openPdfFromCalendar(ev.pdf_id, ev.pdf_page);
+            } else {
+                btnOpenPdf.classList.add('hidden');
+            }
+
+            const modal = document.getElementById('event-modal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function closeEventModal() {
+            const modal = document.getElementById('event-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+
+        async function saveEvent(e) {
+            e.preventDefault();
+            const formData = new FormData(document.getElementById('event-form'));
+            formData.append('action', 'save');
+            if (!document.getElementById('ev-send-sms').checked || !userSub.is_vip) {
+                formData.set('send_sms', '0');
+            }
+            const res = await fetch('api/api_calendar.php', { method: 'POST', body: formData });
+            const data = await res.json();
+            if (data.status === 'success') {
+                closeEventModal();
+                renderCalendar();
+            } else {
+                alert(data.message || 'خطا در ذخیره برنامه');
+            }
+        }
+
+        async function duplicateCurrentEvent() {
+            const id = document.getElementById('ev-id').value;
+            if (!id) return;
+            const fd = new FormData();
+            fd.append('action', 'duplicate');
+            fd.append('id', id);
+
+            const res = await fetch('api/api_calendar.php', { method: 'POST', body: fd });
+            const data = await res.json();
+            if (data.status === 'success') {
+                closeEventModal();
+                renderCalendar();
+            } else {
+                alert(data.message || 'خطا در کپی کردن برنامه');
+            }
+        }
+
+        async function moveCurrentEventToTomorrow() {
+            const id = document.getElementById('ev-id').value;
+            if (!id) return;
+            const fd = new FormData();
+            fd.append('action', 'move_to_tomorrow');
+            fd.append('id', id);
+
+            const res = await fetch('api/api_calendar.php', { method: 'POST', body: fd });
+            const data = await res.json();
+            if (data.status === 'success') {
+                closeEventModal();
+                renderCalendar();
+            } else {
+                alert(data.message || 'خطا در انتقال برنامه');
+            }
+        }
+
+        function startPomodoroForCurrentEvent() {
+            const id    = document.getElementById('ev-id').value;
+            const title = document.getElementById('ev-title').value;
+            if (!id) return;
+
+            closeEventModal();
+            const widget = document.getElementById('pomodoro-widget');
+            widget.classList.remove('hidden');
+
+            const box = document.getElementById('pomodoro-linked-task-box');
+            box.classList.remove('hidden');
+            document.getElementById('pomodoro-linked-title').textContent = title;
+            document.getElementById('btn-pomodoro-complete-task').onclick = async () => {
+                const fd = new FormData();
+                fd.append('action', 'toggle_complete');
+                fd.append('id', id);
+                await fetch('api/api_calendar.php', { method: 'POST', body: fd });
+                pauseTimer();
+                box.classList.add('hidden');
+                renderCalendar();
+            };
+
+            setTimerMode('pomodoro');
+            startPauseTimer();
+        }
+
+        function openCopyDayModal() {
+            const m = document.getElementById('copy-day-modal');
+            m.classList.remove('hidden');
+            m.classList.add('flex');
+        }
+
+        function closeCopyDayModal() {
+            const m = document.getElementById('copy-day-modal');
+            m.classList.add('hidden');
+            m.classList.remove('flex');
+        }
+
+        async function handleCopyDay(e) {
+            e.preventDefault();
+            const fd = new FormData();
+            fd.append('action', 'copy_day');
+            fd.append('source_date', document.getElementById('copy-source-date').value);
+            fd.append('target_date', document.getElementById('copy-target-date').value);
+            fd.append('only_study', document.getElementById('copy-only-study').checked ? '1' : '0');
+
+            const res = await fetch('api/api_calendar.php', { method: 'POST', body: fd });
+            const data = await res.json();
+            alert(data.message);
+            if (data.status === 'success') {
+                closeCopyDayModal();
+                renderCalendar();
+            }
+        }
+
+        async function toggleCurrentEventComplete() {
+            const id = document.getElementById('ev-id').value;
+            if (!id) return;
+            const fd = new FormData();
+            fd.append('action', 'toggle_complete');
+            fd.append('id', id);
+
+            const tc = document.getElementById('ev-test-correct').value;
+            const tw = document.getElementById('ev-test-wrong').value;
+            const tb = document.getElementById('ev-test-blank').value;
+            if (tc !== '' || tw !== '' || tb !== '') {
+                fd.append('test_correct', tc || 0);
+                fd.append('test_wrong', tw || 0);
+                fd.append('test_blank', tb || 0);
+            }
+
+            await fetch('api/api_calendar.php', { method: 'POST', body: fd });
+            closeEventModal();
+            renderCalendar();
+        }
+
+        async function deleteCurrentEvent() {
+            const id = document.getElementById('ev-id').value;
+            if (!id || !confirm('آیا از حذف این برنامه مطمئن هستید؟')) return;
+            const fd = new FormData();
+            fd.append('action', 'delete');
+            fd.append('id', id);
+            await fetch('api/api_calendar.php', { method: 'POST', body: fd });
+            closeEventModal();
+            renderCalendar();
+        }
+
+        // ====================================================
+        // مدیریت پوشه‌بندی، زوم دوانگشتی، حالت کاملاً فول‌صفحه و موتور PDFخوان
+        // ====================================================
+        let pdfFolders = [];
+        let pdfList = [];
+        let openFolderIds = { 'unassigned': true };
+        let activePdfMeta = null;
+        let pdfDocInstance = null;
+        let activeRenderTask = null;
+        let currentPageNum = 1;
+        let currentZoomMode = 'fit-width';
+        let customScale = 1.0;
+        let fitWidthBaseScale = 1.0;
+        let unscaledPdfW = 600;
+        let unscaledPdfH = 800;
+        let isRenderingPage = false;
+        let pendingPageNum = null;
+        let isPdfDarkMode = false;
+        let isReaderFullScreen = false;
+
+        async function fetchUserPdfs() {
+            try {
+                const res = await fetch('api/api_pdf.php?action=list');
+                const data = await res.json();
+                if (data.status === 'success') {
+                    pdfFolders = data.folders || [];
+                    pdfList    = data.pdfs || [];
+                    if (data.subscription) {
+                        userSub = data.subscription;
+                    }
+                    pdfFolders.forEach(f => {
+                        if (openFolderIds[f.id] === undefined) {
+                            openFolderIds[f.id] = true;
+                        }
+                    });
+                    refreshSubscriptionUI();
+                    renderFolderAccordionList();
+                    syncDropdowns();
+                }
+            } catch (err) {
+                console.error('Error loading PDFs:', err);
+            }
+        }
+
+        function syncDropdowns() {
+            const evSelect = document.getElementById('ev-pdf-id');
+            if (evSelect) {
+                const cur = evSelect.value;
+                let html = '<option value="">-- بدون جزوه --</option>';
+                pdfList.forEach(p => {
+                    const folderPrefix = p.folder_name ? `[${p.folder_name}] ` : '';
+                    const lockPrefix   = p.is_locked ? '🔒 ' : '';
+                    html += `<option value="${p.id}">${escapeHtml(lockPrefix + folderPrefix + p.title)}</option>`;
+                });
+                evSelect.innerHTML = html;
+                evSelect.value = cur;
+            }
+
+            const folderOptionsHtml = '<option value="">📂 عمومی (بدون پوشه)</option>' +
+                pdfFolders.map(f => `<option value="${f.id}">📁 ${escapeHtml(f.name)}</option>`).join('');
+
+            const upSelect = document.getElementById('upload-folder-select');
+            if (upSelect) upSelect.innerHTML = folderOptionsHtml;
+
+            const moveSelect = document.getElementById('move-folder-select');
+            if (moveSelect) moveSelect.innerHTML = folderOptionsHtml;
+        }
+
+        function toggleFolderOpen(folderKey) {
+            openFolderIds[folderKey] = !openFolderIds[folderKey];
+            renderFolderAccordionList();
+        }
+
+        function renderFolderAccordionList() {
+            const container = document.getElementById('pdf-list-container');
+            if (pdfFolders.length === 0 && pdfList.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center text-slate-500 text-xs py-10 px-4 space-y-3">
+                        <div>هنوز پوشه یا جزوه‌ای نساخته‌اید.</div>
+                        <button type="button" onclick="openFolderModal()" class="bg-indigo-50 text-indigo-700 border border-indigo-200 px-3 py-1.5 rounded-lg font-bold">
+                            📁+ ساخت اولین پوشه درسی
+                        </button>
+                    </div>
+                `;
+                return;
+            }
+
+            let html = '';
+
+            pdfFolders.forEach(folder => {
+                const items = pdfList.filter(p => Number(p.folder_id) === Number(folder.id));
+                const isOpen = !!openFolderIds[folder.id];
+                const arrowIcon = isOpen ? '▼' : '◄';
+
+                html += `
+                    <div class="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-2xs">
+                        <div onclick="toggleFolderOpen(${folder.id})" class="px-3 py-2.5 bg-slate-100/90 hover:bg-slate-200/70 flex items-center justify-between cursor-pointer transition select-none">
+                            <div class="flex items-center gap-1.5 font-extrabold text-xs text-slate-800 min-w-0">
+                                <span class="text-[10px] text-slate-500 w-3">${arrowIcon}</span>
+                                <span class="w-3 h-3 rounded-full shrink-0" style="background:${folder.color}"></span>
+                                <span class="truncate">📁 ${escapeHtml(folder.name)}</span>
+                                <span class="text-[10px] bg-white px-1.5 py-0.5 rounded-full text-slate-600 border">${items.length}</span>
+                            </div>
+                            <div class="flex items-center gap-1 shrink-0" onclick="event.stopPropagation()">
+                                <button type="button" onclick="openUploadModal(${folder.id})" class="text-[10px] bg-indigo-600 hover:bg-indigo-700 text-white px-2 py-0.5 rounded-md font-bold" title="آپلود مستقیم جزوه در این پوشه">+ PDF</button>
+                                <button type="button" onclick="deleteFolder(event, ${folder.id})" class="text-slate-400 hover:text-rose-600 text-xs px-1" title="حذف پوشه">🗑️</button>
+                            </div>
+                        </div>
+                        <div class="${isOpen ? 'block' : 'hidden'} p-2 space-y-2 border-t border-slate-200 bg-white">
+                            ${items.length > 0
+                                ? items.map(renderSinglePdfCard).join('')
+                                : `<div class="text-[11px] text-slate-400 text-center py-3">این پوشه خالی است.</div>`
+                            }
+                        </div>
+                    </div>
+                `;
+            });
+
+            const unassigned = pdfList.filter(p => !p.folder_id);
+            if (unassigned.length > 0 || pdfFolders.length === 0) {
+                const isUnassignedOpen = openFolderIds['unassigned'] !== false;
+                const arrowIcon = isUnassignedOpen ? '▼' : '◄';
+                html += `
+                    <div class="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-2xs">
+                        <div onclick="toggleFolderOpen('unassigned')" class="px-3 py-2.5 bg-slate-100/90 hover:bg-slate-200/70 flex items-center justify-between cursor-pointer transition select-none">
+                            <div class="flex items-center gap-1.5 font-extrabold text-xs text-slate-700">
+                                <span class="text-[10px] text-slate-500 w-3">${arrowIcon}</span>
+                                <span>📂 عمومی / بدون پوشه</span>
+                                <span class="text-[10px] bg-white px-1.5 py-0.5 rounded-full text-slate-600 border">${unassigned.length}</span>
+                            </div>
+                        </div>
+                        <div class="${isUnassignedOpen ? 'block' : 'hidden'} p-2 space-y-2 border-t border-slate-200 bg-white">
+                            ${unassigned.map(renderSinglePdfCard).join('')}
+                        </div>
+                    </div>
+                `;
+            }
+
+            container.innerHTML = html;
+        }
+
+        function renderSinglePdfCard(item) {
+            const isActive = activePdfMeta && Number(activePdfMeta.id) === Number(item.id);
+            const total = Math.max(1, Number(item.total_pages));
+            const last  = Math.min(total, Math.max(1, Number(item.last_page)));
+            const pct   = Math.round((last / total) * 100);
+            const starCount = Array.isArray(item.starred_pages) ? item.starred_pages.length : 0;
+            const isLocked  = !!item.is_locked;
+
+            return `
+                <div onclick="loadAndOpenPdf(${item.id}, ${last})" class="p-2.5 rounded-xl border transition cursor-pointer ${isLocked ? 'border-amber-300 bg-amber-50/40 opacity-80' : (isActive ? 'border-indigo-600 bg-indigo-50/80 ring-1 ring-indigo-500' : 'border-slate-200 hover:border-indigo-300 bg-slate-50/40')}">
+                    <div class="flex items-start justify-between gap-1">
+                        <div class="min-w-0">
+                            <h4 class="text-xs font-extrabold text-slate-800 leading-snug truncate">${isLocked ? '🔒 ' : ''}${escapeHtml(item.title)}</h4>
+                            ${isLocked ? `<span class="inline-block mt-1 text-[10px] bg-amber-200/80 text-amber-950 px-1.5 py-0.5 rounded font-bold">نیاز به تمدید اشتراک ویژه</span>` : ''}
+                        </div>
+                        <div class="flex items-center gap-1 shrink-0" onclick="event.stopPropagation()">
+                            ${starCount > 0 ? `<span class="text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-bold">⭐${starCount}</span>` : ''}
+                            <button type="button" onclick="openMovePdfModal(event, ${item.id}, '${item.folder_id || ''}')" class="text-slate-500 hover:text-indigo-600 text-xs px-1" title="انتقال به پوشه دیگر">📁</button>
+                            <button type="button" onclick="deletePdfItem(event, ${item.id})" class="text-slate-400 hover:text-rose-600 text-xs px-1" title="حذف جزوه">🗑️</button>
+                        </div>
+                    </div>
+                    <div class="mt-2">
+                        <div class="flex justify-between text-[10px] text-slate-500 mb-1">
+                            <span>مطالعه تا ص ${last} از ${total}</span>
+                            <span class="font-bold text-indigo-600">${pct}%</span>
+                        </div>
+                        <div class="w-full h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                            <div class="h-full bg-indigo-600 rounded-full" style="width:${pct}%"></div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function openFolderModal() {
+            document.getElementById('folder-form').reset();
+            const m = document.getElementById('folder-modal');
+            m.classList.remove('hidden');
+            m.classList.add('flex');
+            setTimeout(() => document.getElementById('folder-name-input').focus(), 50);
+        }
+
+        function closeFolderModal() {
+            const m = document.getElementById('folder-modal');
+            m.classList.add('hidden');
+            m.classList.remove('flex');
+        }
+
+        async function handleCreateFolder(e) {
+            e.preventDefault();
+            const btn = document.getElementById('btn-submit-folder');
+            btn.disabled = true;
+            btn.textContent = 'در حال ساخت...';
+
+            try {
+                const fd = new FormData(document.getElementById('folder-form'));
+                fd.append('action', 'create_folder');
+                const res = await fetch('api/api_pdf.php', { method: 'POST', body: fd });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    if (data.folder && data.folder.id) {
+                        openFolderIds[data.folder.id] = true;
+                    }
+                    closeFolderModal();
+                    await fetchUserPdfs();
+                } else {
+                    alert(data.message || 'خطا در ساخت پوشه');
+                }
+            } catch (err) {
+                alert('خطا در ارتباط با سرور.');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'ساخت پوشه';
+            }
+        }
+
+        async function deleteFolder(e, folderId) {
+            if (e) e.stopPropagation();
+            if (!confirm('آیا این پوشه حذف شود؟ (جزوات داخل آن پاک نمی‌شوند و به بخش عمومی منتقل می‌گردند)')) return;
+            const fd = new FormData();
+            fd.append('action', 'delete_folder');
+            fd.append('folder_id', folderId);
+            await fetch('api/api_pdf.php', { method: 'POST', body: fd });
+            fetchUserPdfs();
+        }
+
+        function openMovePdfModal(e, pdfId, currentFolderId) {
+            if (e) e.stopPropagation();
+            document.getElementById('move-pdf-id').value = pdfId;
+            document.getElementById('move-folder-select').value = currentFolderId || '';
+            const m = document.getElementById('move-pdf-modal');
+            m.classList.remove('hidden');
+            m.classList.add('flex');
+        }
+
+        function closeMovePdfModal() {
+            const m = document.getElementById('move-pdf-modal');
+            m.classList.add('hidden');
+            m.classList.remove('flex');
+        }
+
+        async function handleMovePdf(e) {
+            e.preventDefault();
+            const pdfId = document.getElementById('move-pdf-id').value;
+            const folderId = document.getElementById('move-folder-select').value;
+
+            const fd = new FormData();
+            fd.append('action', 'move_pdf');
+            fd.append('pdf_id', pdfId);
+            fd.append('folder_id', folderId);
+
+            const res = await fetch('api/api_pdf.php', { method: 'POST', body: fd });
+            const data = await res.json();
+            if (data.status === 'success') {
+                if (folderId) openFolderIds[folderId] = true;
+                closeMovePdfModal();
+                fetchUserPdfs();
+            } else {
+                alert(data.message || 'خطا در انتقال جزوه');
+            }
+        }
+
+        function openUploadModal(defaultFolderId = '') {
+            if (!userSub.is_vip && pdfList.length >= FREE_MAX_PDF_CNT) {
+                openSubscriptionModal(`شما کاربر عادی هستید و سهمیه ${FREE_MAX_PDF_CNT} فایل رایگان شما پر شده است. برای آپلود فایل جدید، لطفاً فایل قبلی را حذف کنید یا اشتراک ویژه تهیه نمایید.`);
+                return;
+            }
+
+            document.getElementById('upload-pdf-form').reset();
+            syncDropdowns();
+            if (defaultFolderId !== undefined && defaultFolderId !== null) {
+                document.getElementById('upload-folder-select').value = String(defaultFolderId);
+            }
+
+            const hintEl = document.getElementById('upload-modal-tier-hint');
+            if (userSub.is_vip) {
+                hintEl.className = 'p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-[11px] font-bold';
+                hintEl.textContent = `👑 اشتراک ویژه فعال: امکان آپلود نامحدود جزوه تا سقف ${VIP_MAX_PDF_MB} مگابایت برای هر فایل.`;
+            } else {
+                hintEl.className = 'p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-[11px] font-bold';
+                hintEl.textContent = `👤 حساب عادی: حداکثر ${FREE_MAX_PDF_CNT} فایل PDF با حداکثر حجم ${FREE_MAX_PDF_MB} مگابایت مجاز است.`;
+            }
+
+            const m = document.getElementById('upload-pdf-modal');
+            m.classList.remove('hidden');
+            m.classList.add('flex');
+        }
+
+        function closeUploadModal() {
+            const m = document.getElementById('upload-pdf-modal');
+            m.classList.add('hidden');
+            m.classList.remove('flex');
+        }
+
+        async function handlePdfUpload(e) {
+            e.preventDefault();
+            const fileInput = document.getElementById('upload-pdf-file-input');
+            const file = fileInput.files[0];
+            if (!file) return;
+
+            const maxAllowedMB = userSub.is_vip ? VIP_MAX_PDF_MB : FREE_MAX_PDF_MB;
+            const fileSizeMB   = +(file.size / (1024 * 1024)).toFixed(1);
+
+            if (file.size > maxAllowedMB * 1024 * 1024) {
+                if (!userSub.is_vip) {
+                    closeUploadModal();
+                    openSubscriptionModal(`حجم فایل انتخابی شما (${fileSizeMB} مگابایت) بیشتر از سقف مجاز کاربران عادی (${FREE_MAX_PDF_MB} مگابایت) است.`);
+                } else {
+                    alert(`حجم فایل (${fileSizeMB} مگابایت) بیش از سقف مجاز سرور (${VIP_MAX_PDF_MB} مگابایت) است.`);
+                }
+                return;
+            }
+
+            const btn = document.getElementById('btn-submit-upload');
+            btn.disabled = true;
+            btn.textContent = 'در حال آپلود...';
+
+            try {
+                const fd = new FormData(document.getElementById('upload-pdf-form'));
+                fd.append('action', 'upload');
+                const res = await fetch('api/api_pdf.php', { method: 'POST', body: fd });
+                const data = await res.json();
+
+                if (data.status === 'success') {
+                    if (data.pdf.folder_id) {
+                        openFolderIds[data.pdf.folder_id] = true;
+                    }
+                    closeUploadModal();
+                    await fetchUserPdfs();
+                    loadAndOpenPdf(data.pdf.id, 1);
+                } else if (data.need_vip) {
+                    closeUploadModal();
+                    openSubscriptionModal(data.message);
+                } else {
+                    alert(data.message || 'خطا در آپلود');
+                }
+            } catch (err) {
+                alert('خطا در آپلود فایل PDF.');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'آپلود و ذخیره';
+            }
+        }
+
+        async function deletePdfItem(e, pdfId) {
+            if (e) e.stopPropagation();
+            if (!confirm('آیا از حذف کامل این جزوه مطمئن هستید؟')) return;
+            const fd = new FormData();
+            fd.append('action', 'delete');
+            fd.append('pdf_id', pdfId);
+            await fetch('api/api_pdf.php', { method: 'POST', body: fd });
+            if (activePdfMeta && Number(activePdfMeta.id) === Number(pdfId)) {
+                location.reload();
+            } else {
+                fetchUserPdfs();
+            }
+        }
+
+        async function loadAndOpenPdf(pdfId, targetPage = null) {
+            if (pdfList.length === 0) await fetchUserPdfs();
+            const targetItem = pdfList.find(p => Number(p.id) === Number(pdfId));
+            if (!targetItem) return;
+
+            if (targetItem.is_locked) {
+                openSubscriptionModal(`جزوه «${targetItem.title}» به دلیل اتمام مهلت اشتراک ویژه قفل شده است. برای دسترسی مجدد به تمام جزوات و هایلایت‌های خود، اشتراک را تمدید نمایید.`);
+                return;
+            }
+
+            activePdfMeta = targetItem;
+            if (activePdfMeta.folder_id) {
+                openFolderIds[activePdfMeta.folder_id] = true;
+            }
+            closePdfSidebarMobile();
+
+            document.getElementById('active-pdf-title').textContent = activePdfMeta.title;
+            document.getElementById('pdf-empty-state').classList.add('hidden');
+            document.getElementById('pdf-canvas-wrapper').classList.add('hidden');
+            document.getElementById('pdf-loading-overlay').classList.remove('hidden');
+
+            try {
+                const pdfjs = await ensurePdfJsReady();
+
+                const rawResponse = await fetch(`api/api_pdf.php?action=raw&pdf_id=${activePdfMeta.id}&t=${Date.now()}`, {
+                    cache: 'no-store',
+                    credentials: 'same-origin'
+                });
+
+                if (rawResponse.status === 403) {
+                    document.getElementById('pdf-loading-overlay').classList.add('hidden');
+                    document.getElementById('pdf-empty-state').classList.remove('hidden');
+                    openSubscriptionModal('این جزوه نیازمند تمدید اشتراک ویژه است.');
+                    return;
+                }
+
+                if (!rawResponse.ok) {
+                    throw new Error(`خطای سرور در دریافت فایل (کد ${rawResponse.status})`);
+                }
+
+                const arrayBuffer = await rawResponse.arrayBuffer();
+                const pdfBytes = new Uint8Array(arrayBuffer);
+
+                if (pdfDocInstance && typeof pdfDocInstance.destroy === 'function') {
+                    await pdfDocInstance.destroy();
+                }
+
+                const loadingTask = pdfjs.getDocument({
+                    data: pdfBytes,
+                    cMapUrl: activeCdnConfig.cmaps,
+                    cMapPacked: true,
+                    standardFontDataUrl: activeCdnConfig.fonts,
+                    isEvalSupported: true,
+                    disableFontFace: false,
+                    useSystemFonts: true,
+                    disableAutoFetch: true,
+                    disableStream: true,
+                    disableRange: true
+                });
+
+                pdfDocInstance = await loadingTask.promise;
+
+                const totalPages = pdfDocInstance.numPages;
+                activePdfMeta.total_pages = totalPages;
+                document.getElementById('pdf-total-pages').textContent = totalPages;
+                document.getElementById('pdf-page-input').max = totalPages;
+
+                currentPageNum = targetPage
+                    ? Math.min(totalPages, Math.max(1, Number(targetPage)))
+                    : Math.min(totalPages, Math.max(1, Number(activePdfMeta.last_page)));
+
+                document.getElementById('pdf-loading-overlay').classList.add('hidden');
+                document.getElementById('pdf-canvas-wrapper').classList.remove('hidden');
+                document.getElementById('pdf-controls-group').classList.remove('hidden');
+                document.getElementById('pdf-controls-group').classList.add('flex');
+                document.getElementById('pdf-fab-btn').classList.remove('hidden');
+                document.getElementById('pdf-fab-btn').classList.add('flex');
+                document.getElementById('pdf-floating-bottom-bar').classList.remove('hidden');
+                document.getElementById('pdf-floating-bottom-bar').classList.add('flex');
+
+                renderFolderAccordionList();
+                await renderPdfPage(currentPageNum);
+            } catch (err) {
+                document.getElementById('pdf-loading-overlay').classList.add('hidden');
+                document.getElementById('pdf-empty-state').classList.remove('hidden');
+                alert('خطا در باز کردن فایل PDF: ' + err.message);
+            }
+        }
+
+        async function renderPdfPage(num) {
+            if (!pdfDocInstance) return;
+
+            if (isRenderingPage) {
+                pendingPageNum = num;
+                if (activeRenderTask && typeof activeRenderTask.cancel === 'function') {
+                    try { activeRenderTask.cancel(); } catch (e) {}
+                }
+                return;
+            }
+            isRenderingPage = true;
+
+            try {
+                const page = await pdfDocInstance.getPage(num);
+                const container   = document.getElementById('pdf-viewport-container');
+                const wrapper     = document.getElementById('pdf-canvas-wrapper');
+                const canvas      = document.getElementById('pdf-render-canvas');
+                const annotCanvas = document.getElementById('pdf-annot-canvas');
+                const ctx         = canvas.getContext('2d');
+
+                wrapper.classList.remove('page-flip-anim');
+                void wrapper.offsetWidth;
+                wrapper.classList.add('page-flip-anim');
+
+                const unscaledViewport = page.getViewport({ scale: 1 });
+                unscaledPdfW = unscaledViewport.width;
+                unscaledPdfH = unscaledViewport.height;
+
+                const pad = isReaderFullScreen ? 0 : (window.innerWidth < 640 ? 4 : 24);
+                const availableWidth = Math.max(260, container.clientWidth - pad);
+                fitWidthBaseScale = isReaderFullScreen
+                    ? (availableWidth / unscaledPdfW)
+                    : Math.min(availableWidth / unscaledPdfW, 1.95);
+
+                let scale = customScale;
+                if (currentZoomMode === 'fit-width') {
+                    scale = fitWidthBaseScale;
+                    customScale = scale;
+                }
+
+                const viewport = page.getViewport({ scale: scale });
+                const maxSafeDpr = window.innerWidth < 768 ? 1.85 : 2.0;
+                let outputScale = Math.min(window.devicePixelRatio || 1, maxSafeDpr);
+
+                const maxCanvasDim = 3800;
+                if (viewport.width * outputScale > maxCanvasDim || viewport.height * outputScale > maxCanvasDim) {
+                    outputScale = Math.min(maxCanvasDim / viewport.width, maxCanvasDim / viewport.height);
+                }
+
+                const cssWidth  = Math.round(viewport.width);
+                const cssHeight = Math.round(viewport.height);
+
+                wrapper.style.width       = cssWidth + "px";
+                wrapper.style.height      = cssHeight + "px";
+                canvas.width              = Math.floor(cssWidth * outputScale);
+                canvas.height             = Math.floor(cssHeight * outputScale);
+                annotCanvas.width         = cssWidth;
+                annotCanvas.height        = cssHeight;
+
+                ctx.save();
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.restore();
+
+                ctx.direction = 'ltr';
+                ctx.textAlign = 'left';
+
+                const transform = outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : null;
+                activeRenderTask = page.render({ canvasContext: ctx, transform, viewport });
+                await activeRenderTask.promise;
+                activeRenderTask = null;
+
+                document.getElementById('pdf-page-input').value = num;
+                document.getElementById('floating-page-pill').textContent = `ص ${num} از ${pdfDocInstance.numPages}`;
+
+                updateStarButtonUI();
+                loadPageAnnotations(activePdfMeta.id, num);
+                saveReadingProgress(activePdfMeta.id, num, pdfDocInstance.numPages);
+            } catch (err) {
+                if (err && err.name !== 'RenderingCancelledException') {
+                    console.error('Page render error:', err);
+                }
+            } finally {
+                isRenderingPage = false;
+                if (pendingPageNum !== null) {
+                    const next = pendingPageNum;
+                    pendingPageNum = null;
+                    await renderPdfPage(next);
+                }
+            }
+        }
+
+        function updateStarButtonUI() {
+            if (!activePdfMeta) return;
+            const stars = Array.isArray(activePdfMeta.starred_pages) ? activePdfMeta.starred_pages : [];
+            const isStarred = stars.includes(Number(currentPageNum));
+            const btn = document.getElementById('btn-star-page');
+            btn.textContent = isStarred ? '⭐' : '☆';
+            btn.className = isStarred
+                ? 'px-2 py-1 bg-amber-500/20 text-amber-300 border border-amber-400/40 rounded-lg text-xs font-bold transition'
+                : 'px-2 py-1 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs font-bold text-slate-400 transition';
+            document.getElementById('starred-count-badge').textContent = stars.length;
+        }
+
+        async function toggleStarCurrentPage() {
+            if (!activePdfMeta) return;
+            const fd = new FormData();
+            fd.append('action', 'toggle_star_page');
+            fd.append('pdf_id', activePdfMeta.id);
+            fd.append('page_number', currentPageNum);
+
+            const res = await fetch('api/api_pdf.php', { method: 'POST', body: fd });
+            const data = await res.json();
+            if (data.status === 'success') {
+                activePdfMeta.starred_pages = data.starred_pages;
+                updateStarButtonUI();
+                renderFolderAccordionList();
+            }
+        }
+
+        function openStarredModal() {
+            if (!activePdfMeta) return;
+            const stars = Array.isArray(activePdfMeta.starred_pages) ? activePdfMeta.starred_pages : [];
+            const listEl = document.getElementById('starred-pages-list');
+            if (stars.length === 0) {
+                listEl.innerHTML = `<div class="text-center text-slate-400 py-6">هنوز صفحه‌ای از این جزوه را ستاره‌دار (☆) نکرده‌اید.</div>`;
+            } else {
+                listEl.innerHTML = stars.map(p => `
+                    <div onclick="jumpToInputPage(${p}); closeStarredModal();" class="p-2.5 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-xl flex items-center justify-between cursor-pointer transition">
+                        <span class="font-extrabold text-amber-900">⭐ صفحه ${p} جزوه</span>
+                        <span class="text-indigo-600 font-bold text-[11px]">پرش به صفحه ❮</span>
+                    </div>
+                `).join('');
+            }
+            const m = document.getElementById('starred-modal');
+            m.classList.remove('hidden');
+            m.classList.add('flex');
+        }
+
+        function closeStarredModal() {
+            const m = document.getElementById('starred-modal');
+            m.classList.add('hidden');
+            m.classList.remove('flex');
+        }
+
+        // ====================================================
+        // ژست لمسی زوم دو انگشتی قفل‌شده روی نقطه بین دو انگشت + وسط‌چین هوشمند در جزوه‌خوان
+        // ====================================================
+        let isPinchingPdf = false;
+        (function initPdfTouchGestures() {
+            const pdfViewportEl = document.getElementById('pdf-viewport-container');
+            const wrapperEl     = document.getElementById('pdf-canvas-wrapper');
+
+            let startDist  = 0;
+            let startScale = 1.0;
+            let liveScale  = 1.0;
+            let pinchRelX  = 0.5;
+            let pinchRelY  = 0.5;
+            let pinchVpX   = 0;
+            let pinchVpY   = 0;
+            let reRenderTimer = null;
+
+            let touchSwipeStartX = 0;
+            let touchSwipeStartY = 0;
+            let lastTapTime = 0;
+            let lastTapX = 0;
+            let lastTapY = 0;
+
+            pdfViewportEl.addEventListener('touchstart', (e) => {
+                if (!pdfDocInstance) return;
+
+                if (e.touches.length === 2) {
+                    isPinchingPdf = true;
+                    if (isDrawingAnnot) {
+                        isDrawingAnnot = false;
+                        currentStroke = null;
+                        redrawAllAnnotations();
+                    }
+                    if (reRenderTimer) clearTimeout(reRenderTimer);
+
+                    const t1 = e.touches[0];
+                    const t2 = e.touches[1];
+                    const midClientX = (t1.clientX + t2.clientX) / 2;
+                    const midClientY = (t1.clientY + t2.clientY) / 2;
+
+                    startDist  = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+                    startScale = customScale;
+                    liveScale  = customScale;
+
+                    const vpRect   = pdfViewportEl.getBoundingClientRect();
+                    const wrapRect = wrapperEl.getBoundingClientRect();
+
+                    pinchVpX = midClientX - vpRect.left;
+                    pinchVpY = midClientY - vpRect.top;
+
+                    pinchRelX = Math.min(1, Math.max(0, (midClientX - wrapRect.left) / Math.max(1, wrapRect.width)));
+                    pinchRelY = Math.min(1, Math.max(0, (midClientY - wrapRect.top) / Math.max(1, wrapRect.height)));
+                } else if (e.touches.length === 1 && !isPinchingPdf && currentTool === 'pan') {
+                    touchSwipeStartX = e.touches[0].clientX;
+                    touchSwipeStartY = e.touches[0].clientY;
+
+                    const now = Date.now();
+                    if (now - lastTapTime < 280 && Math.hypot(touchSwipeStartX - lastTapX, touchSwipeStartY - lastTapY) < 28) {
+                        e.preventDefault();
+                        const wrapRect = wrapperEl.getBoundingClientRect();
+                        const tapRelX  = Math.min(1, Math.max(0, (touchSwipeStartX - wrapRect.left) / Math.max(1, wrapRect.width)));
+                        const tapRelY  = Math.min(1, Math.max(0, (touchSwipeStartY - wrapRect.top) / Math.max(1, wrapRect.height)));
+
+                        if (currentZoomMode === 'fit-width' || customScale <= fitWidthBaseScale * 1.15) {
+                            currentZoomMode = 'custom';
+                            customScale = Math.min(3.2, fitWidthBaseScale * 1.85);
+                            renderPdfPage(currentPageNum).then(() => {
+                                const newW = wrapperEl.offsetWidth;
+                                const newH = wrapperEl.offsetHeight;
+                                pdfViewportEl.scrollTo({
+                                    left: Math.max(0, wrapperEl.offsetLeft + (tapRelX * newW) - (pdfViewportEl.clientWidth / 2)),
+                                    top:  Math.max(0, wrapperEl.offsetTop + (tapRelY * newH) - (pdfViewportEl.clientHeight / 2)),
+                                    behavior: 'smooth'
+                                });
+                            });
+                        } else {
+                            setFitWidthZoom();
+                        }
+                        lastTapTime = 0;
+                    } else {
+                        lastTapTime = now;
+                        lastTapX = touchSwipeStartX;
+                        lastTapY = touchSwipeStartY;
+                    }
+                }
+            }, { passive: false });
+
+            pdfViewportEl.addEventListener('touchmove', (e) => {
+                if (!isPinchingPdf || e.touches.length !== 2 || !pdfDocInstance) return;
+                e.preventDefault();
+
+                const t1 = e.touches[0];
+                const t2 = e.touches[1];
+                const curDist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+                if (startDist < 10) return;
+
+                const midClientX = (t1.clientX + t2.clientX) / 2;
+                const midClientY = (t1.clientY + t2.clientY) / 2;
+                const vpRect     = pdfViewportEl.getBoundingClientRect();
+                pinchVpX = midClientX - vpRect.left;
+                pinchVpY = midClientY - vpRect.top;
+
+                const ratio = curDist / startDist;
+                liveScale = Math.min(3.5, Math.max(0.45, startScale * ratio));
+
+                const newW = Math.round(unscaledPdfW * liveScale);
+                const newH = Math.round(unscaledPdfH * liveScale);
+                wrapperEl.style.width  = newW + 'px';
+                wrapperEl.style.height = newH + 'px';
+
+                pdfViewportEl.scrollLeft = Math.max(0, wrapperEl.offsetLeft + (pinchRelX * newW) - pinchVpX);
+                pdfViewportEl.scrollTop  = Math.max(0, wrapperEl.offsetTop + (pinchRelY * newH) - pinchVpY);
+            }, { passive: false });
+
+            pdfViewportEl.addEventListener('touchend', (e) => {
+                if (isPinchingPdf) {
+                    if (e.touches.length < 2) {
+                        isPinchingPdf = false;
+                        if (Math.abs(liveScale - customScale) > 0.04) {
+                            currentZoomMode = 'custom';
+                            customScale     = liveScale;
+                            const savedScrollLeft = pdfViewportEl.scrollLeft;
+                            const savedScrollTop  = pdfViewportEl.scrollTop;
+
+                            if (reRenderTimer) clearTimeout(reRenderTimer);
+                            reRenderTimer = setTimeout(() => {
+                                renderPdfPage(currentPageNum).then(() => {
+                                    pdfViewportEl.scrollLeft = savedScrollLeft;
+                                    pdfViewportEl.scrollTop  = savedScrollTop;
+                                });
+                            }, 180);
+                        }
+                    }
+                    return;
+                }
+
+                if (currentTool === 'pan' && pdfDocInstance && e.changedTouches.length === 1) {
+                    if (pdfViewportEl.scrollWidth > pdfViewportEl.clientWidth + 15) return;
+                    const dx = e.changedTouches[0].clientX - touchSwipeStartX;
+                    const dy = e.changedTouches[0].clientY - touchSwipeStartY;
+                    if (Math.abs(dx) > 65 && Math.abs(dx) > Math.abs(dy) * 1.6) {
+                        if (dx > 0) changePdfPage(1);
+                        else changePdfPage(-1);
+                    }
+                }
+            }, { passive: true });
+        })();
+
+        function changePdfPage(delta) {
+            if (!pdfDocInstance) return;
+            const next = currentPageNum + delta;
+            if (next >= 1 && next <= pdfDocInstance.numPages) {
+                currentPageNum = next;
+                renderPdfPage(currentPageNum);
+                document.getElementById('pdf-viewport-container').scrollTop = 0;
+            }
+        }
+
+        function jumpToInputPage(val) {
+            if (!pdfDocInstance) return;
+            currentPageNum = Math.min(pdfDocInstance.numPages, Math.max(1, parseInt(val) || 1));
+            renderPdfPage(currentPageNum);
+            document.getElementById('pdf-viewport-container').scrollTop = 0;
+        }
+
+        function adjustZoom(delta) {
+            if (!pdfDocInstance) return;
+            currentZoomMode = 'custom';
+            customScale = Math.min(3.5, Math.max(0.45, customScale + delta));
+            renderPdfPage(currentPageNum);
+        }
+
+        function setFitWidthZoom() {
+            if (!pdfDocInstance) return;
+            currentZoomMode = 'fit-width';
+            renderPdfPage(currentPageNum);
+        }
+
+        function togglePdfDarkMode() {
+            isPdfDarkMode = !isPdfDarkMode;
+            const canvas = document.getElementById('pdf-render-canvas');
+            const btn = document.getElementById('btn-pdf-dark');
+            if (isPdfDarkMode) {
+                canvas.classList.add('pdf-dark-mode');
+                btn.textContent = '☀️ روز';
+            } else {
+                canvas.classList.remove('pdf-dark-mode');
+                btn.textContent = '🌙 شب';
+            }
+        }
+
+        function toggleFullScreenReader() {
+            isReaderFullScreen = !isReaderFullScreen;
+            const mainHeader = document.getElementById('main-app-header');
+            const pdfTopBar  = document.getElementById('pdf-top-bar');
+            const pdfSidebar = document.getElementById('pdf-sidebar');
+            const viewport   = document.getElementById('pdf-viewport-container');
+            const exitBtn    = document.getElementById('floating-exit-fullscreen-btn');
+
+            if (isReaderFullScreen) {
+                mainHeader.classList.add('hidden');
+                pdfTopBar.classList.add('hidden');
+                pdfSidebar.classList.add('hidden');
+                viewport.classList.remove('py-6', 'px-1', 'sm:p-4');
+                viewport.classList.add('py-4', 'px-0');
+                exitBtn.classList.remove('hidden');
+                exitBtn.classList.add('flex');
+
+                if (document.documentElement.requestFullscreen) {
+                    document.documentElement.requestFullscreen().catch(() => {});
+                }
+            } else {
+                mainHeader.classList.remove('hidden');
+                pdfTopBar.classList.remove('hidden');
+                pdfSidebar.classList.remove('hidden');
+                viewport.classList.remove('py-4', 'px-0');
+                viewport.classList.add('py-6', 'px-1', 'sm:p-4');
+                exitBtn.classList.add('hidden');
+                exitBtn.classList.remove('flex');
+
+                if (document.fullscreenElement && document.exitFullscreen) {
+                    document.exitFullscreen().catch(() => {});
+                }
+            }
+
+            currentZoomMode = 'fit-width';
+            if (pdfDocInstance) {
+                setTimeout(() => renderPdfPage(currentPageNum), 80);
+            }
+        }
+
+        function togglePdfSidebar() {
+            const sb = document.getElementById('pdf-sidebar');
+            const bd = document.getElementById('pdf-sidebar-backdrop');
+            if (window.innerWidth < 768) {
+                const isClosed = sb.classList.contains('translate-x-full');
+                if (isClosed) {
+                    sb.classList.remove('translate-x-full');
+                    bd.classList.remove('hidden');
+                } else {
+                    closePdfSidebarMobile();
+                }
+            } else {
+                sb.classList.toggle('hidden');
+                if (pdfDocInstance && currentZoomMode === 'fit-width') {
+                    setTimeout(() => renderPdfPage(currentPageNum), 50);
+                }
+            }
+        }
+
+        function closePdfSidebarMobile() {
+            document.getElementById('pdf-sidebar').classList.add('translate-x-full');
+            document.getElementById('pdf-sidebar-backdrop').classList.add('hidden');
+        }
+
+        function toggleToolsPopup() {
+            document.getElementById('pdf-tools-popup').classList.toggle('hidden');
+        }
+
+        async function saveReadingProgress(pdfId, lastPage, totalPages) {
+            if (activePdfMeta) {
+                activePdfMeta.last_page = lastPage;
+                activePdfMeta.total_pages = totalPages;
+                renderFolderAccordionList();
+            }
+            const fd = new FormData();
+            fd.append('action', 'save_progress');
+            fd.append('pdf_id', pdfId);
+            fd.append('last_page', lastPage);
+            fd.append('total_pages', totalPages);
+            await fetch('api/api_pdf.php', { method: 'POST', body: fd });
+        }
+
+        async function openPdfFromCalendar(pdfId, pageNumber) {
+            closeEventModal();
+            switchMainSection('pdf');
+            await fetchUserPdfs();
+            loadAndOpenPdf(pdfId, pageNumber);
+        }
+
+        function switchMainSection(sec) {
+            const calSec = document.getElementById('section-calendar');
+            const pdfSec = document.getElementById('section-pdf');
+            const navCal = document.getElementById('nav-calendar');
+            const navPdf = document.getElementById('nav-pdf');
+
+            if (sec === 'calendar') {
+                if (isReaderFullScreen) toggleFullScreenReader();
+                calSec.classList.remove('hidden');
+                pdfSec.classList.add('hidden');
+                navCal.className = 'px-2.5 md:px-3.5 py-1.5 rounded-lg text-xs font-bold bg-indigo-600 text-white transition';
+                navPdf.className = 'px-2.5 md:px-3.5 py-1.5 rounded-lg text-xs font-bold text-slate-300 hover:text-white transition';
+            } else {
+                calSec.classList.add('hidden');
+                pdfSec.classList.remove('hidden');
+                navPdf.className = 'px-2.5 md:px-3.5 py-1.5 rounded-lg text-xs font-bold bg-indigo-600 text-white transition';
+                navCal.className = 'px-2.5 md:px-3.5 py-1.5 rounded-lg text-xs font-bold text-slate-300 hover:text-white transition';
+                if (pdfDocInstance && currentZoomMode === 'fit-width') {
+                    setTimeout(() => renderPdfPage(currentPageNum), 50);
+                }
+            }
+        }
+
+        // ====================================================
+        // موتور پیشرفته حاشیه‌نویسی روی PDF (قلم ۱۰۰٪ مات، خط‌کش، کادر فرمول، ضخامت و عکس صفحه)
+        // ====================================================
+        let currentTool = 'pan';
+        let currentColor = '#facc15';
+        let currentSizeFactor = 2;
+        let pageAnnotations = [];
+        let isDrawingAnnot = false;
+        let currentStroke = null;
+        let saveAnnotTimeout = null;
+
+        const annotCanvas = document.getElementById('pdf-annot-canvas');
+        const annotCtx = annotCanvas.getContext('2d');
+        const TOOL_ICONS = { pan: '✋', pen: '✏️', highlight: '🖍️', line: '📏', rect: '⬜', note: '📌', eraser: '🧽' };
+
+        function setAnnotTool(tool, autoCloseOnMobile = false) {
+            currentTool = tool;
+            document.getElementById('fab-active-icon').textContent = TOOL_ICONS[tool] || '✋';
+
+            if (tool === 'pen' && currentColor === '#facc15') {
+                setAnnotColor('#1d4ed8');
+            } else if (tool === 'highlight' && (currentColor === '#0f172a' || currentColor === '#1d4ed8' || currentColor === '#ffffff')) {
+                setAnnotColor('#facc15');
+            }
+
+            document.querySelectorAll('.annot-tool-btn').forEach(btn => {
+                btn.classList.remove('bg-indigo-600', 'text-white');
+                btn.classList.add('bg-slate-800', 'text-slate-200');
+            });
+            const activeBtn = document.getElementById('tool-' + tool);
+            if (activeBtn) {
+                activeBtn.classList.remove('bg-slate-800', 'text-slate-200');
+                activeBtn.classList.add('bg-indigo-600', 'text-white');
+            }
+
+            if (tool === 'pan') {
+                annotCanvas.classList.add('pointer-events-none');
+                annotCanvas.style.touchAction = 'auto';
+            } else {
+                annotCanvas.classList.remove('pointer-events-none');
+                annotCanvas.style.touchAction = 'none';
+            }
+
+            if (autoCloseOnMobile && window.innerWidth < 768) {
+                document.getElementById('pdf-tools-popup').classList.add('hidden');
+            }
+        }
+
+        function setAnnotColor(color) {
+            currentColor = color;
+            const fabDot = document.getElementById('fab-color-dot');
+            if (fabDot) fabDot.style.backgroundColor = color;
+
+            document.querySelectorAll('.annot-color-btn').forEach(btn => {
+                const isSelected = (String(btn.dataset.color).toLowerCase() === String(color).toLowerCase());
+                btn.className = isSelected
+                    ? 'annot-color-btn w-6 h-6 rounded-full ring-2 ring-white scale-115 transition'
+                    : 'annot-color-btn w-6 h-6 rounded-full opacity-70 hover:opacity-100 transition';
+                btn.style.backgroundColor = btn.dataset.color;
+                if (btn.dataset.color === '#ffffff') {
+                    btn.style.border = '2px solid #94a3b8';
+                }
+            });
+        }
+
+        function setAnnotSize(sizeLevel) {
+            currentSizeFactor = sizeLevel;
+            [1, 2, 3, 4].forEach(s => {
+                const btn = document.getElementById('size-btn-' + s);
+                if (btn) {
+                    btn.className = (s === sizeLevel)
+                        ? 'annot-size-btn px-2 py-1 rounded-lg text-[10px] font-extrabold bg-indigo-600 text-white'
+                        : 'annot-size-btn px-2 py-1 rounded-lg text-[10px] font-bold bg-slate-700 text-slate-300';
+                }
+            });
+        }
+
+        function getNormalizedPointerPos(e) {
+            const rect = annotCanvas.getBoundingClientRect();
+            const clientX = (e.touches && e.touches.length > 0) ? e.touches[0].clientX : e.clientX;
+            const clientY = (e.touches && e.touches.length > 0) ? e.touches[0].clientY : e.clientY;
+            return {
+                x: Math.min(1, Math.max(0, (clientX - rect.left) / rect.width)),
+                y: Math.min(1, Math.max(0, (clientY - rect.top) / rect.height))
+            };
+        }
+
+        document.getElementById('pdf-canvas-wrapper').addEventListener('click', (e) => {
+            if (currentTool !== 'pan' || !activePdfMeta || pageAnnotations.length === 0) return;
+            const rect = annotCanvas.getBoundingClientRect();
+            const nx = (e.clientX - rect.left) / rect.width;
+            const ny = (e.clientY - rect.top) / rect.height;
+            const noteIdx = findAnnotationAtPos(nx, ny, 'note');
+            if (noteIdx !== -1) {
+                const updated = prompt('📌 متن یادداشت شما (برای حذف، متن را خالی کرده و OK بزنید):', pageAnnotations[noteIdx].text);
+                if (updated === null) return;
+                if (updated.trim() === '') pageAnnotations.splice(noteIdx, 1);
+                else pageAnnotations[noteIdx].text = updated.trim();
+                redrawAllAnnotations();
+                triggerAutoSaveAnnotations();
+            }
+        });
+
+        async function loadPageAnnotations(pdfId, pageNum) {
+            try {
+                const res = await fetch(`api/api_pdf.php?action=get_annotations&pdf_id=${pdfId}&page_number=${pageNum}`);
+                const json = await res.json();
+                pageAnnotations = (json.status === 'success' && Array.isArray(json.data)) ? json.data : [];
+                redrawAllAnnotations();
+            } catch (e) {
+                pageAnnotations = [];
+            }
+        }
+
+        function redrawAllAnnotations() {
+            const w = annotCanvas.width;
+            const h = annotCanvas.height;
+            annotCtx.clearRect(0, 0, w, h);
+            pageAnnotations.forEach(item => drawSingleAnnotation(item, w, h));
+            if (currentStroke) drawSingleAnnotation(currentStroke, w, h);
+        }
+
+        function computeStrokeLineWidth(type, sizeLevel, canvasW) {
+            const lvl = Number(sizeLevel || 2);
+            if (type === 'highlight') {
+                const mults = { 1: 0.015, 2: 0.024, 3: 0.036, 4: 0.052 };
+                return Math.max(10, canvasW * (mults[lvl] || 0.024));
+            } else {
+                const mults = { 1: 0.0018, 2: 0.0034, 3: 0.0065, 4: 0.014 };
+                return Math.max(1.5, canvasW * (mults[lvl] || 0.0034));
+            }
+        }
+
+        function drawSingleAnnotation(item, w, h) {
+            annotCtx.save();
+            annotCtx.direction = 'ltr';
+
+            const strokeW = computeStrokeLineWidth(item.type, item.size || 2, w);
+            annotCtx.strokeStyle = item.color || '#facc15';
+            annotCtx.lineWidth   = strokeW;
+            annotCtx.lineCap     = 'round';
+            annotCtx.lineJoin    = 'round';
+
+            annotCtx.globalAlpha = (item.type === 'highlight') ? 0.36 : 1.0;
+
+            if (item.type === 'highlight' || item.type === 'pen') {
+                if (!item.points || item.points.length === 0) { annotCtx.restore(); return; }
+                annotCtx.beginPath();
+                annotCtx.moveTo(item.points[0].x * w, item.points[0].y * h);
+                for (let i = 1; i < item.points.length; i++) {
+                    annotCtx.lineTo(item.points[i].x * w, item.points[i].y * h);
+                }
+                annotCtx.stroke();
+            } else if (item.type === 'line') {
+                if (!item.points || item.points.length < 2) { annotCtx.restore(); return; }
+                annotCtx.beginPath();
+                annotCtx.moveTo(item.points[0].x * w, item.points[0].y * h);
+                annotCtx.lineTo(item.points[1].x * w, item.points[1].y * h);
+                annotCtx.stroke();
+            } else if (item.type === 'rect') {
+                if (!item.points || item.points.length < 2) { annotCtx.restore(); return; }
+                const x1 = item.points[0].x * w;
+                const y1 = item.points[0].y * h;
+                const x2 = item.points[1].x * w;
+                const y2 = item.points[1].y * h;
+                annotCtx.strokeRect(Math.min(x1, x2), Math.min(y1, y2), Math.abs(x2 - x1), Math.abs(y2 - y1));
+            } else if (item.type === 'note') {
+                const nx = item.x * w;
+                const ny = item.y * h;
+                const boxSize = Math.max(22, w * 0.032);
+                annotCtx.fillStyle = item.color || '#facc15';
+                annotCtx.strokeStyle = '#0f172a';
+                annotCtx.lineWidth = 1.5;
+                annotCtx.fillRect(nx - boxSize / 2, ny - boxSize / 2, boxSize, boxSize);
+                annotCtx.strokeRect(nx - boxSize / 2, ny - boxSize / 2, boxSize, boxSize);
+                annotCtx.font = `bold ${Math.round(boxSize * 0.55)}px sans-serif`;
+                annotCtx.textAlign = 'center';
+                annotCtx.textBaseline = 'middle';
+                annotCtx.fillText('📌', nx, ny);
+            }
+            annotCtx.restore();
+        }
+
+        function handlePointerStart(e) {
+            if (currentTool === 'pan' || !activePdfMeta || isPinchingPdf) return;
+            if (e.touches && e.touches.length > 1) {
+                isDrawingAnnot = false;
+                currentStroke = null;
+                redrawAllAnnotations();
+                return;
+            }
+            if (e.cancelable) e.preventDefault();
+            const pos = getNormalizedPointerPos(e);
+
+            if (currentTool === 'note') {
+                const existingIdx = findAnnotationAtPos(pos.x, pos.y, 'note');
+                if (existingIdx !== -1) {
+                    const updated = prompt('متن یادداشت (برای حذف، خالی بگذارید):', pageAnnotations[existingIdx].text);
+                    if (updated === null) return;
+                    if (updated.trim() === '') pageAnnotations.splice(existingIdx, 1);
+                    else pageAnnotations[existingIdx].text = updated.trim();
+                    redrawAllAnnotations();
+                    triggerAutoSaveAnnotations();
+                    return;
+                }
+                const text = prompt('متن نکته یا فرمول خود را وارد کنید:');
+                if (text && text.trim() !== '') {
+                    pageAnnotations.push({ type: 'note', color: currentColor, x: pos.x, y: pos.y, text: text.trim() });
+                    redrawAllAnnotations();
+                    triggerAutoSaveAnnotations();
+                }
+                return;
+            }
+
+            if (currentTool === 'eraser') {
+                isDrawingAnnot = true;
+                eraseAnnotationNear(pos.x, pos.y);
+                return;
+            }
+
+            if (currentTool === 'highlight' || currentTool === 'pen') {
+                isDrawingAnnot = true;
+                currentStroke = { type: currentTool, color: currentColor, size: currentSizeFactor, points: [pos] };
+                redrawAllAnnotations();
+            } else if (currentTool === 'line' || currentTool === 'rect') {
+                isDrawingAnnot = true;
+                currentStroke = { type: currentTool, color: currentColor, size: currentSizeFactor, points: [pos, pos] };
+                redrawAllAnnotations();
+            }
+        }
+
+        function handlePointerMove(e) {
+            if (!isDrawingAnnot || currentTool === 'pan' || isPinchingPdf) return;
+            if (e.touches && e.touches.length > 1) {
+                isDrawingAnnot = false;
+                currentStroke = null;
+                redrawAllAnnotations();
+                return;
+            }
+            if (e.cancelable) e.preventDefault();
+            const pos = getNormalizedPointerPos(e);
+
+            if (currentTool === 'eraser') {
+                eraseAnnotationNear(pos.x, pos.y);
+                return;
+            }
+
+            if (currentStroke) {
+                if (currentStroke.type === 'line' || currentStroke.type === 'rect') {
+                    currentStroke.points[1] = pos;
+                } else {
+                    currentStroke.points.push(pos);
+                }
+                redrawAllAnnotations();
+            }
+        }
+
+        function handlePointerEnd() {
+            if (!isDrawingAnnot) return;
+            isDrawingAnnot = false;
+            if (currentStroke && currentStroke.points.length > 0) {
+                pageAnnotations.push(currentStroke);
+                currentStroke = null;
+                redrawAllAnnotations();
+                triggerAutoSaveAnnotations();
+            }
+        }
+
+        function distToSegment(px, py, x1, y1, x2, y2) {
+            const l2 = (x2 - x1) ** 2 + (y2 - y1) ** 2;
+            if (l2 === 0) return Math.hypot(px - x1, py - y1);
+            let t = ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / l2;
+            t = Math.max(0, Math.min(1, t));
+            return Math.hypot(px - (x1 + t * (x2 - x1)), py - (y1 + t * (y2 - y1)));
+        }
+
+        function findAnnotationAtPos(x, y, filterType = null) {
+            const threshold = 0.032;
+            for (let i = pageAnnotations.length - 1; i >= 0; i--) {
+                const item = pageAnnotations[i];
+                if (filterType && item.type !== filterType) continue;
+                if (item.type === 'note' && Math.hypot(item.x - x, item.y - y) <= threshold) return i;
+                if (item.type === 'line' && item.points && item.points.length >= 2) {
+                    if (distToSegment(x, y, item.points[0].x, item.points[0].y, item.points[1].x, item.points[1].y) <= threshold) return i;
+                }
+                if (item.type === 'rect' && item.points && item.points.length >= 2) {
+                    const x1 = item.points[0].x, y1 = item.points[0].y;
+                    const x2 = item.points[1].x, y2 = item.points[1].y;
+                    if (distToSegment(x, y, x1, y1, x2, y1) <= threshold ||
+                        distToSegment(x, y, x2, y1, x2, y2) <= threshold ||
+                        distToSegment(x, y, x2, y2, x1, y2) <= threshold ||
+                        distToSegment(x, y, x1, y2, x1, y1) <= threshold) return i;
+                }
+                if (item.points && item.points.some(pt => Math.hypot(pt.x - x, pt.y - y) <= threshold)) return i;
+            }
+            return -1;
+        }
+
+        function eraseAnnotationNear(x, y) {
+            const idx = findAnnotationAtPos(x, y);
+            if (idx !== -1) {
+                pageAnnotations.splice(idx, 1);
+                redrawAllAnnotations();
+                triggerAutoSaveAnnotations();
+            }
+        }
+
+        function undoLastAnnotation() {
+            if (pageAnnotations.length === 0) return;
+            pageAnnotations.pop();
+            redrawAllAnnotations();
+            triggerAutoSaveAnnotations();
+        }
+
+        function clearAllPageAnnotations() {
+            if (pageAnnotations.length === 0 || !confirm('تمام علامت‌های این صفحه پاک شوند؟')) return;
+            pageAnnotations = [];
+            redrawAllAnnotations();
+            triggerAutoSaveAnnotations();
+        }
+
+        function downloadAnnotatedPageImage() {
+            if (!pdfDocInstance || !activePdfMeta) return;
+            const pdfCanvas = document.getElementById('pdf-render-canvas');
+            const outCanvas = document.createElement('canvas');
+            outCanvas.width  = pdfCanvas.width;
+            outCanvas.height = pdfCanvas.height;
+            const outCtx = outCanvas.getContext('2d');
+
+            outCtx.drawImage(pdfCanvas, 0, 0);
+            outCtx.drawImage(annotCanvas, 0, 0, outCanvas.width, outCanvas.height);
+
+            const link = document.createElement('a');
+            const safeTitle = activePdfMeta.title.replace(/[^a-zA-Z0-9آ-ی_\-]/g, '_');
+            link.download = `${safeTitle}_Page_${currentPageNum}.png`;
+            link.href = outCanvas.toDataURL('image/png');
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        function triggerAutoSaveAnnotations() {
+            if (!activePdfMeta) return;
+            const statusEl = document.getElementById('annot-save-status');
+            statusEl.textContent = '⏳ ذخیره...';
+            if (saveAnnotTimeout) clearTimeout(saveAnnotTimeout);
+            const pdfId = activePdfMeta.id;
+            const page  = currentPageNum;
+            const data  = JSON.stringify(pageAnnotations);
+
+            saveAnnotTimeout = setTimeout(async () => {
+                const fd = new FormData();
+                fd.append('action', 'save_annotations');
+                fd.append('pdf_id', pdfId);
+                fd.append('page_number', page);
+                fd.append('annotation_data', data);
+                const res = await fetch('api/api_pdf.php', { method: 'POST', body: fd });
+                const json = await res.json();
+                statusEl.textContent = json.status === 'success' ? '✓ ذخیره شد' : '❌ خطا';
+            }, 350);
+        }
+
+        annotCanvas.addEventListener('mousedown', handlePointerStart);
+        annotCanvas.addEventListener('mousemove', handlePointerMove);
+        window.addEventListener('mouseup', handlePointerEnd);
+        annotCanvas.addEventListener('touchstart', handlePointerStart, { passive: false });
+        annotCanvas.addEventListener('touchmove', handlePointerMove, { passive: false });
+        window.addEventListener('touchend', handlePointerEnd);
+
+        // ====================================================
+        // تایمر پومودورو و کرنومتر مطالعه
+        // ====================================================
+        let timerMode = 'pomodoro';
+        let timerSeconds = 25 * 60;
+        let timerInterval = null;
+        let isTimerRunning = false;
+
+        function togglePomodoroWidget() {
+            document.getElementById('pomodoro-widget').classList.toggle('hidden');
+        }
+
+        function setTimerMode(mode) {
+            pauseTimer();
+            timerMode = mode;
+            ['pomodoro', 'break', 'stopwatch'].forEach(m => {
+                document.getElementById('tmode-' + m).className = (m === mode)
+                    ? 'flex-1 py-1 rounded-md bg-indigo-600 text-white'
+                    : 'flex-1 py-1 rounded-md text-slate-400';
+            });
+            timerSeconds = (mode === 'pomodoro') ? 25 * 60 : (mode === 'break' ? 5 * 60 : 0);
+            updateTimerDisplay();
+        }
+
+        function updateTimerDisplay() {
+            const m = String(Math.floor(timerSeconds / 60)).padStart(2, '0');
+            const s = String(timerSeconds % 60).padStart(2, '0');
+            const formatted = `${m}:${s}`;
+            document.getElementById('timer-display').textContent = formatted;
+            document.getElementById('header-timer-badge').textContent = isTimerRunning ? formatted : 'تایمر';
+        }
+
+        function startPauseTimer() {
+            if (isTimerRunning) {
+                pauseTimer();
+            } else {
+                isTimerRunning = true;
+                document.getElementById('btn-timer-toggle').textContent = 'توقف';
+                document.getElementById('btn-timer-toggle').className = 'flex-1 py-2 bg-amber-600 hover:bg-amber-500 text-white font-extrabold rounded-xl transition';
+                timerInterval = setInterval(() => {
+                    if (timerMode === 'stopwatch') {
+                        timerSeconds++;
+                    } else {
+                        if (timerSeconds > 0) {
+                            timerSeconds--;
+                        } else {
+                            pauseTimer();
+                            playBeepSound();
+                            alert('⏱️ زمان تایمر به پایان رسید! خسته نباشی.');
+                        }
+                    }
+                    updateTimerDisplay();
+                }, 1000);
+            }
+        }
+
+        function pauseTimer() {
+            isTimerRunning = false;
+            if (timerInterval) clearInterval(timerInterval);
+            document.getElementById('btn-timer-toggle').textContent = 'شروع';
+            document.getElementById('btn-timer-toggle').className = 'flex-1 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold rounded-xl transition';
+            updateTimerDisplay();
+        }
+
+        function resetTimer() {
+            setTimerMode(timerMode);
+        }
+
+        function playBeepSound() {
+            try {
+                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                const osc = ctx.createOscillator();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(880, ctx.currentTime);
+                osc.connect(ctx.destination);
+                osc.start();
+                osc.stop(ctx.currentTime + 0.5);
+            } catch (e) {}
+        }
+
+        function openPhoneModal() {
+            refreshSubscriptionUI();
+            const m = document.getElementById('phone-modal');
+            m.classList.remove('hidden');
+            m.classList.add('flex');
+        }
+
+        function closePhoneModal() {
+            const m = document.getElementById('phone-modal');
+            m.classList.add('hidden');
+            m.classList.remove('flex');
+        }
+
+        async function handleUpdatePhone(e) {
+            e.preventDefault();
+            const newPhone = document.getElementById('user-phone-input').value;
+            const fd = new FormData();
+            fd.append('action', 'update_phone');
+            fd.append('phone', newPhone);
+            const res = await fetch('api/api_calendar.php', { method: 'POST', body: fd });
+            const data = await res.json();
+            alert(data.message);
+            if (data.status === 'success') {
+                userSub.phone = newPhone;
+                closePhoneModal();
+            }
+        }
+
+        async function triggerSmsCheckNow(showAlert = false) {
+            try {
+                const res = await fetch('cron_sms.php');
+                const data = await res.json();
+                if (showAlert) {
+                    alert(`بررسی انجام شد.\nبرنامه‌های عقب‌افتاده واجد شرایط: ${data.overdue_found}\nپیامک یادآوری ارسال‌شده: ${data.sms_sent}`);
+                }
+            } catch (e) {}
+        }
+
+        function escapeHtml(str) {
+            return String(str).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+        }
+
+        window.addEventListener('resize', () => {
+            if (pdfDocInstance && currentZoomMode === 'fit-width' && !document.getElementById('section-pdf').classList.contains('hidden')) {
+                renderPdfPage(currentPageNum);
+            }
+        });
+
+        window.addEventListener('DOMContentLoaded', () => {
+            refreshSubscriptionUI();
+            initTimeLabels();
+            renderCalendar();
+            fetchUserPdfs();
+            document.getElementById('calendar-scroll-area').scrollTop = 7 * hourHeightPx;
+
+            if (new URLSearchParams(window.location.search).get('tab') === 'pdf') {
+                switchMainSection('pdf');
+            }
+
+            triggerSmsCheckNow(false);
+            setInterval(() => triggerSmsCheckNow(false), 180000);
+        });

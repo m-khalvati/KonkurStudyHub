@@ -1,5 +1,5 @@
 <?php
-require_once 'config.php';
+require_once dirname(__DIR__) . '/config/config.php';
 
 if (!isset($_SESSION['user_id'])) {
     http_response_code(401);
@@ -15,7 +15,7 @@ $action  = $_GET['action'] ?? ($_POST['action'] ?? '');
 $sub_info = get_user_subscription_info($pdo, $user_id);
 
 // اطمینان از وجود پوشه آپلود و ساخت خودکار .htaccess برای جلوگیری از خطای 412 در وب‌سرور
-$upload_dir = __DIR__ . '/uploads/';
+$upload_dir = dirname(__DIR__) . '/uploads/';
 if (!is_dir($upload_dir)) {
     mkdir($upload_dir, 0755, true);
 }
@@ -58,7 +58,7 @@ if ($action === 'raw') {
         exit('Subscription required to open this PDF');
     }
 
-    $full_path = __DIR__ . '/' . $row['file_path'];
+    $full_path = dirname(__DIR__) . '/' . $row['file_path'];
     if (!is_file($full_path)) {
         http_response_code(404);
         exit('Physical file missing');
@@ -414,7 +414,7 @@ try {
         $pdf = $stmt->fetch();
 
         if ($pdf) {
-            $full_path = __DIR__ . '/' . $pdf['file_path'];
+            $full_path = dirname(__DIR__) . '/' . $pdf['file_path'];
             if (is_file($full_path)) {
                 @unlink($full_path);
             }

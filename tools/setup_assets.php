@@ -1,5 +1,5 @@
 <?php
-require_once 'config.php';
+require_once dirname(__DIR__) . '/config/config.php';
 require_login();
 
 @set_time_limit(300);
@@ -14,7 +14,7 @@ if (empty($sub_info['is_admin']) && $user_id !== 1) {
     die('<div style="font-family:tahoma;text-align:center;margin-top:60px;direction:rtl;">⛔ فقط مدیر کل سامانه مجاز به اجرای بومی‌ساز دارایی‌های هاست است.</div>');
 }
 
-$base_dir   = __DIR__ . '/assets';
+$base_dir   = dirname(__DIR__) . '/assets';
 $css_dir    = $base_dir . '/css';
 $fonts_dir  = $base_dir . '/fonts';
 $pdfjs_dir  = $base_dir . '/pdfjs';
@@ -374,7 +374,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['run_localization'])) 
     $patched_count = 0;
 
     foreach ($target_php_files as $php_file) {
-        $full_p = __DIR__ . '/' . $php_file;
+        $full_p = dirname(__DIR__) . '/' . $php_file;
         if (!is_file($full_p)) continue;
 
         $content = file_get_contents($full_p);

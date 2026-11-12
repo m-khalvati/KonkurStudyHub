@@ -1,5 +1,5 @@
 <?php
-require_once 'config.php';
+require_once __DIR__ . '/config/config.php';
 
 if (isset($_GET['logout'])) {
     session_destroy();
@@ -70,6 +70,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ورود به محیط آموزشی و برنامه‌ریزی کنکور</title>
+    <!-- Local Host Assets (Offline-First) -->
+    <link href="assets/css/tailwind-local.css" rel="stylesheet">
+    <link href="assets/css/vazirmatn-local.css" rel="stylesheet">
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css" rel="stylesheet">
     <style>

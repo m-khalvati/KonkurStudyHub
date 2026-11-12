@@ -1,0 +1,76 @@
+/* Modular Stylesheet for paper_reader.php */
+body { font-family: 'Vazirmatn', sans-serif; -webkit-tap-highlight-color: transparent; overscroll-behavior: none; }
+        .custom-scroll::-webkit-scrollbar { width: 5px; height: 5px; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        .pdf-dark-mode { filter: invert(0.92) hue-rotate(180deg) contrast(1.05); }
+
+        /* قفل کردن کامل ابعاد، وسط‌چین کردن عمودی و افقی مقاله در موبایل و حفظ جهت LTR */
+        #paper-canvas-wrapper {
+            direction: ltr !important;
+            text-align: left !important;
+            unicode-bidi: isolate !important;
+            font-family: sans-serif !important;
+            flex-shrink: 0 !important;
+            margin: auto !important;
+            transform-origin: 0 0;
+        }
+        #paper-render-canvas {
+            direction: ltr !important;
+            display: block !important;
+            width: 100% !important;
+            height: 100% !important;
+            max-width: none !important;
+        }
+        #paper-paragraphs-layer {
+            direction: ltr !important;
+            text-align: left !important;
+            unicode-bidi: isolate !important;
+            width: 100% !important;
+            height: 100% !important;
+            pointer-events: auto;
+        }
+
+        /* استایل باکس‌های تعاملی هر جمله (بر اساس مختصات درصدی دقیق بدون همپوشانی عمودی) */
+        .seg-box {
+            position: absolute;
+            border-radius: 2px;
+            border: 1px solid transparent;
+            background-color: transparent;
+            cursor: pointer;
+            box-sizing: border-box;
+            transition: background-color 0.1s ease, border-color 0.1s ease;
+        }
+        .seg-box.hover-seg {
+            border-color: rgba(79, 70, 229, 0.55);
+            background-color: rgba(99, 102, 241, 0.16);
+        }
+        .seg-box.read-seg {
+            background-color: rgba(56, 189, 248, 0.11);
+            border-bottom: 1px solid rgba(2, 132, 199, 0.28);
+        }
+        .seg-box.noted-seg {
+            border-color: rgba(16, 185, 129, 0.85) !important;
+            background-color: rgba(16, 185, 129, 0.22) !important;
+        }
+        .seg-box.noted-seg-first::after {
+            content: '📌';
+            position: absolute;
+            top: -7px;
+            left: -7px;
+            font-size: 9px;
+            background: #ecfdf5;
+            border: 1px solid #10b981;
+            border-radius: 999px;
+            width: 14px;
+            height: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+            z-index: 20;
+        }
+        .seg-box.active-seg {
+            border: 1.5px solid #4f46e5 !important;
+            background-color: rgba(79, 70, 229, 0.28) !important;
+            z-index: 15;
+        }

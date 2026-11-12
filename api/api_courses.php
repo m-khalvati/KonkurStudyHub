@@ -1,5 +1,5 @@
 <?php
-require_once 'config.php';
+require_once dirname(__DIR__) . '/config/config.php';
 
 @set_time_limit(120);
 header('Content-Type: application/json; charset=utf-8');
@@ -32,7 +32,7 @@ $is_admin = !empty($sub_info['is_admin']) || ($user_id === 1);
 // ====================================================
 // ۱. ساخت خودکار پوشه آپلود دوره‌ها و ۵ جدول دیتابیس
 // ====================================================
-$courses_upload_dir = __DIR__ . '/uploads/courses/';
+$courses_upload_dir = dirname(__DIR__) . '/uploads/courses/';
 $subtitles_dir      = $courses_upload_dir . 'subtitles/';
 $booklets_dir       = $courses_upload_dir . 'booklets/';
 $covers_dir         = $courses_upload_dir . 'covers/';
@@ -616,7 +616,7 @@ try {
             $raw_content = curl_exec($ch);
             curl_close($ch);
         } else {
-            $local_file = __DIR__ . '/' . ltrim($sub_url, '/');
+            $local_file = dirname(__DIR__) . '/' . ltrim($sub_url, '/');
             if (is_file($local_file)) {
                 $raw_content = file_get_contents($local_file);
             }
@@ -774,7 +774,7 @@ try {
         }
 
         $b_url = trim($lesson['booklet_url']);
-        $pdfs_dir = __DIR__ . '/uploads/pdfs/';
+        $pdfs_dir = dirname(__DIR__) . '/uploads/pdfs/';
         if (!is_dir($pdfs_dir)) @mkdir($pdfs_dir, 0755, true);
 
         $new_pdf_name = 'lesson_bkl_u' . $user_id . '_' . time() . '_' . bin2hex(random_bytes(3)) . '.pdf';
@@ -797,7 +797,7 @@ try {
             }
             file_put_contents($dest_full, $raw_pdf);
         } else {
-            $src_local = __DIR__ . '/' . ltrim($b_url, '/');
+            $src_local = dirname(__DIR__) . '/' . ltrim($b_url, '/');
             if (!is_file($src_local) || strtolower(pathinfo($src_local, PATHINFO_EXTENSION)) !== 'pdf') {
                 echo json_encode(['status' => 'error', 'message' => 'فقط جزوات با فرمت PDF قابلیت انتقال به محیط جزوه‌خوان را دارند.']);
                 exit;

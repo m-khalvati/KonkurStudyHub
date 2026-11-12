@@ -1,0 +1,124 @@
+/* Modular Stylesheet for courses.php */
+*, *::before, *::after { box-sizing: border-box; }
+        body {
+            font-family: 'Vazirmatn', Tahoma, sans-serif;
+            background-color: #f1f5f9;
+            color: #1e293b;
+            margin: 0;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .custom-scroll::-webkit-scrollbar { width: 5px; height: 5px; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+
+        /* کلاس‌های پایه ضدقطعی */
+        .bg-slate-50 { background-color: #f8fafc !important; }
+        .bg-slate-100 { background-color: #f1f5f9 !important; }
+        .bg-slate-200 { background-color: #e2e8f0 !important; }
+        .bg-slate-700 { background-color: #334155 !important; }
+        .bg-slate-800 { background-color: #1e293b !important; }
+        .bg-slate-900 { background-color: #0f172a !important; }
+        .bg-slate-950 { background-color: #020617 !important; }
+        .text-slate-200 { color: #e2e8f0 !important; }
+        .text-slate-300 { color: #cbd5e1 !important; }
+        .text-slate-400 { color: #94a3b8 !important; }
+        .text-slate-500 { color: #64748b !important; }
+        .text-slate-600 { color: #475569 !important; }
+        .text-slate-700 { color: #334155 !important; }
+        .text-slate-800 { color: #1e293b !important; }
+        .text-slate-900 { color: #0f172a !important; }
+        .text-slate-950 { color: #020617 !important; }
+        .border-slate-200 { border-color: #e2e8f0 !important; }
+        .border-slate-300 { border-color: #cbd5e1 !important; }
+        .border-slate-700 { border-color: #334155 !important; }
+        .border-slate-800 { border-color: #1e293b !important; }
+
+        .bg-indigo-50 { background-color: #eef2ff !important; }
+        .bg-indigo-100 { background-color: #e0e7ff !important; }
+        .bg-indigo-600 { background-color: #4f46e5 !important; }
+        .bg-indigo-700 { background-color: #4338ca !important; }
+        .text-indigo-300 { color: #a5b4fc !important; }
+        .text-indigo-600 { color: #4f46e5 !important; }
+        .text-indigo-700 { color: #4338ca !important; }
+        .text-indigo-800 { color: #3730a3 !important; }
+        .text-indigo-950 { color: #1e1b4b !important; }
+
+        .bg-emerald-50 { background-color: #ecfdf5 !important; }
+        .bg-emerald-100 { background-color: #d1fae5 !important; }
+        .bg-emerald-500 { background-color: #10b981 !important; }
+        .bg-emerald-600 { background-color: #059669 !important; }
+        .text-emerald-300 { color: #6ee7b7 !important; }
+        .text-emerald-400 { color: #34d399 !important; }
+        .text-emerald-700 { color: #047857 !important; }
+        .text-emerald-800 { color: #065f46 !important; }
+
+        .bg-amber-50 { background-color: #fffbeb !important; }
+        .bg-amber-100 { background-color: #fef3c7 !important; }
+        .bg-amber-400 { background-color: #fbbf24 !important; }
+        .bg-amber-500 { background-color: #f59e0b !important; }
+        .text-amber-300 { color: #fcd34d !important; }
+        .text-amber-800 { color: #92400e !important; }
+        .text-amber-900 { color: #78350f !important; }
+
+        .bg-rose-50 { background-color: #fff1f2 !important; }
+        .bg-rose-600 { background-color: #e11d48 !important; }
+        .text-rose-500 { color: #f43f5e !important; }
+        .text-rose-600 { color: #e11d48 !important; }
+
+        .rounded-xl { border-radius: 0.75rem !important; }
+        .rounded-2xl { border-radius: 1rem !important; }
+        .rounded-3xl { border-radius: 1.5rem !important; }
+        .shrink-0 { flex-shrink: 0 !important; }
+        .text-\[10px\] { font-size: 10px !important; }
+        .text-\[11px\] { font-size: 11px !important; }
+
+        @media (min-width: 1024px) {
+            .lg\:grid-cols-12 { grid-template-columns: repeat(12, minmax(0, 1fr)) !important; }
+            .lg\:col-span-8 { grid-column: span 8 / span 8 !important; }
+            .lg\:col-span-4 { grid-column: span 4 / span 4 !important; }
+            .lg\:col-span-12 { grid-column: span 12 / span 12 !important; }
+        }
+
+        /* استایل اختصاصی کانتینر ویدیو و لایه زیرنویس هوشمند */
+        #video-stage-wrapper {
+            position: relative;
+            background-color: #000000;
+            width: 100%;
+            overflow: hidden;
+            border-radius: 1rem;
+            box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.5);
+        }
+        #main-video-element {
+            width: 100%;
+            max-height: 70vh;
+            display: block;
+            margin: 0 auto;
+            background-color: #000;
+        }
+        #custom-subtitle-overlay {
+            position: absolute;
+            bottom: 54px;
+            left: 6%;
+            right: 6%;
+            text-align: center;
+            pointer-events: none;
+            z-index: 25;
+            transition: opacity 0.12s ease;
+        }
+        #custom-subtitle-text {
+            display: inline-block;
+            background-color: rgba(2, 6, 23, 0.82);
+            color: #ffffff;
+            padding: 6px 14px;
+            border-radius: 10px;
+            font-weight: 700;
+            line-height: 1.65;
+            text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            max-width: 100%;
+            white-space: pre-line;
+        }
+        .cue-item.active-cue {
+            background-color: #eef2ff !important;
+            border-color: #6366f1 !important;
+            color: #1e1b4b !important;
+        }

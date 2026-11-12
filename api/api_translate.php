@@ -1,5 +1,5 @@
 <?php
-require_once 'config.php';
+require_once dirname(__DIR__) . '/config/config.php';
 
 @set_time_limit(90);
 
@@ -37,7 +37,7 @@ try {
 } catch (Exception $ignore) {}
 
 // ایجاد خودکار پوشه اختصاصی مقالات (uploads/papers/)
-$papers_dir = __DIR__ . '/uploads/papers/';
+$papers_dir = dirname(__DIR__) . '/uploads/papers/';
 if (!is_dir($papers_dir)) {
     mkdir($papers_dir, 0755, true);
 }
@@ -78,7 +78,7 @@ if ($action === 'raw') {
         exit('Subscription required');
     }
 
-    $full_path = __DIR__ . '/' . $row['file_path'];
+    $full_path = dirname(__DIR__) . '/' . $row['file_path'];
     if (!is_file($full_path)) {
         http_response_code(404);
         exit('Physical file missing');
@@ -677,7 +677,7 @@ try {
             exit;
         }
 
-        $src_full_path = __DIR__ . '/' . $src['file_path'];
+        $src_full_path = dirname(__DIR__) . '/' . $src['file_path'];
         if (!is_file($src_full_path)) {
             echo json_encode(['status' => 'error', 'message' => 'فایل فیزیکی جزوه یافت نشد.']);
             exit;

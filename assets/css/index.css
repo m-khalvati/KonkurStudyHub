@@ -1,0 +1,94 @@
+/* Modular Stylesheet for index.php */
+body { font-family: 'Vazirmatn', sans-serif; -webkit-tap-highlight-color: transparent; overscroll-behavior: none; }
+        .calendar-scroll::-webkit-scrollbar { width: 5px; height: 5px; }
+        .calendar-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        .locked-day-pattern {
+            background-image: repeating-linear-gradient(45deg, #f8fafc 0, #f8fafc 10px, #f1f5f9 10px, #f1f5f9 20px);
+        }
+        .pdf-dark-mode {
+            filter: invert(0.92) hue-rotate(180deg) contrast(1.05);
+        }
+        @keyframes pageFadeIn {
+            from { opacity: 0.45; transform: scale(0.99); }
+            to { opacity: 1; transform: scale(1); }
+        }
+        .page-flip-anim { animation: pageFadeIn 0.18s ease-out; }
+
+        /* استایل کارت‌های تعاملی تقویم (پشتیبانی از Drag & Drop و Resize) */
+        .cal-event-card {
+            transition: box-shadow 0.12s ease, transform 0.1s ease;
+            touch-action: pan-y;
+        }
+        .cal-event-card:hover {
+            z-index: 35 !important;
+            box-shadow: 0 10px 20px -5px rgba(0, 0, 0, 0.35);
+        }
+        .cal-event-card.dragging-active {
+            z-index: 50 !important;
+            opacity: 0.92 !important;
+            transform: scale(1.02);
+            box-shadow: 0 16px 32px -4px rgba(0, 0, 0, 0.45) !important;
+            outline: 2px dashed #ffffff;
+            cursor: grabbing !important;
+            transition: none !important;
+        }
+        .cal-resize-handle {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 11px;
+            cursor: ns-resize;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(to top, rgba(0,0,0,0.28), transparent);
+            touch-action: none;
+        }
+        .cal-resize-handle::after {
+            content: '';
+            width: 22px;
+            height: 3px;
+            border-radius: 999px;
+            background-color: rgba(255, 255, 255, 0.75);
+        }
+
+        /* باکس پیش‌نمایش انتخاب بازه زمانی با کشیدن روی فضای خالی تقویم (Drag-to-Create) */
+        .drag-create-ghost {
+            position: absolute;
+            left: 3px;
+            right: 3px;
+            background-color: rgba(79, 70, 229, 0.24);
+            border: 2px dashed #4f46e5;
+            border-radius: 8px;
+            z-index: 45;
+            pointer-events: none;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #1e1b4b;
+            font-weight: 800;
+            font-size: 11px;
+            box-shadow: 0 4px 12px rgba(79, 70, 229, 0.2);
+        }
+
+        /* قفل کردن کامل ابعاد و وسط‌چین کردن عمودی و افقی جزوه در صفحه موبایل */
+        #pdf-canvas-wrapper {
+            direction: ltr !important;
+            text-align: left !important;
+            unicode-bidi: isolate !important;
+            font-family: sans-serif !important;
+            letter-spacing: normal !important;
+            flex-shrink: 0 !important;
+            margin: auto !important;
+        }
+        #pdf-render-canvas,
+        #pdf-annot-canvas {
+            direction: ltr !important;
+            text-align: left !important;
+            unicode-bidi: isolate !important;
+            width: 100% !important;
+            height: 100% !important;
+            display: block !important;
+            max-width: none !important;
+        }

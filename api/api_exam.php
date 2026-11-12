@@ -1,5 +1,5 @@
 <?php
-require_once 'config.php';
+require_once dirname(__DIR__) . '/config/config.php';
 
 @set_time_limit(120);
 header('Content-Type: application/json; charset=utf-8');
@@ -30,7 +30,7 @@ $is_admin = !empty($sub_info['is_admin']) || ($user_id === 1);
 // ====================================================
 // ۱. ساخت خودکار پوشه تصاویر آزمون و جداول دیتابیس (شامل جدول آمار کلیدهای AI)
 // ====================================================
-$exams_upload_dir = __DIR__ . '/uploads/exams/';
+$exams_upload_dir = dirname(__DIR__) . '/uploads/exams/';
 if (!is_dir($exams_upload_dir)) {
     @mkdir($exams_upload_dir, 0755, true);
 }
@@ -1017,11 +1017,11 @@ try {
         $qStmt = $pdo->prepare("SELECT question_image, explanation_image FROM exam_questions WHERE exam_id = ?");
         $qStmt->execute([$exam_id]);
         foreach ($qStmt->fetchAll() as $row) {
-            if (!empty($row['question_image']) && is_file(__DIR__ . '/' . $row['question_image'])) {
-                @unlink(__DIR__ . '/' . $row['question_image']);
+            if (!empty($row['question_image']) && is_file(dirname(__DIR__) . '/' . $row['question_image'])) {
+                @unlink(dirname(__DIR__) . '/' . $row['question_image']);
             }
-            if (!empty($row['explanation_image']) && is_file(__DIR__ . '/' . $row['explanation_image'])) {
-                @unlink(__DIR__ . '/' . $row['explanation_image']);
+            if (!empty($row['explanation_image']) && is_file(dirname(__DIR__) . '/' . $row['explanation_image'])) {
+                @unlink(dirname(__DIR__) . '/' . $row['explanation_image']);
             }
         }
 
@@ -1221,11 +1221,11 @@ try {
         $q = $stmt->fetch();
 
         if ($q) {
-            if (!empty($q['question_image']) && is_file(__DIR__ . '/' . $q['question_image'])) {
-                @unlink(__DIR__ . '/' . $q['question_image']);
+            if (!empty($q['question_image']) && is_file(dirname(__DIR__) . '/' . $q['question_image'])) {
+                @unlink(dirname(__DIR__) . '/' . $q['question_image']);
             }
-            if (!empty($q['explanation_image']) && is_file(__DIR__ . '/' . $q['explanation_image'])) {
-                @unlink(__DIR__ . '/' . $q['explanation_image']);
+            if (!empty($q['explanation_image']) && is_file(dirname(__DIR__) . '/' . $q['explanation_image'])) {
+                @unlink(dirname(__DIR__) . '/' . $q['explanation_image']);
             }
         }
 

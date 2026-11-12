@@ -14,6 +14,28 @@ $user_id  = (int)$_SESSION['user_id'];
 $action   = $_GET['action'] ?? ($_POST['action'] ?? '');
 $sub_info = get_user_subscription_info($pdo, $user_id);
 
+// اطمینان از وجود جدول آمار کلیدهای هوش مصنوعی
+try {
+    $pdo->exec("
+        CREATE TABLE IF NOT EXISTS `ai_key_stats` (
+          `key_hash` char(32) NOT NULL,
+          `key_masked` varchar(40) NOT NULL,
+          `total_calls` int(11) NOT NULL DEFAULT 0,
+          `success_calls` int(11) NOT NULL DEFAULT 0,
+          `error_calls` int(11) NOT NULL DEFAULT 0,
+          `today_calls` int(11) NOT NULL DEFAULT 0,
+          `last_call_date` date DEFAULT NULL,
+          `translate_calls` int(11) NOT NULL DEFAULT 0,
+          `exam_calls` int(11) NOT NULL DEFAULT 0,
+          `last_http_code` int(11) DEFAULT NULL,
+          `last_model` varchar(60) DEFAULT NULL,
+          `last_error` varchar(255) DEFAULT NULL,
+          `updated_at` timestamp DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          PRIMARY KEY (`key_hash`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_persian_ci;
+    ");
+} catch (Exception $ignore) {}
+
 // ایجاد خودکار پوشه اختصاصی مقالات (uploads/papers/)
 $papers_dir = __DIR__ . '/uploads/papers/';
 if (!is_dir($papers_dir)) {
@@ -37,7 +59,7 @@ function get_allowed_pdf_ids($pdo, $user_id, $is_vip) {
 }
 
 // ====================================================
-// اکشن استریم باینری فایل مقاله (بدون خطای 412 وب‌سرور)
+// اکشن استریم باینری فایل مقاله
 // ====================================================
 if ($action === 'raw') {
     $pdf_id = (int)($_GET['pdf_id'] ?? 0);
@@ -78,7 +100,7 @@ if ($action === 'raw') {
 header('Content-Type: application/json; charset=utf-8');
 
 // ====================================================
-// توابع پاکسازی متن و مدیریت استخر کلیدها و مدل‌ها
+// توابع پاکسازی متن، ثبت آمار کلیدها و موتورهای ترجمه
 // ====================================================
 function sanitize_pdf_english_text($text) {
     $text = trim($text);
@@ -107,6 +129,43 @@ function get_valid_ai_keys_pool() {
         shuffle($pool);
     }
     return $pool;
+}
+
+function mask_translate_ai_key($key) {
+    $key = trim($key);
+    $len = strlen($key);
+    if ($len <= 10) return str_repeat('*', $len);
+    return substr($key, 0, 6) . '...' . substr($key, -4);
+}
+
+function log_translate_ai_key_stat($pdo, $api_key, $is_ok, $http_code, $model_name, $err_msg = '') {
+    try {
+        $hash      = md5(trim($api_key));
+        $masked    = mask_translate_ai_key($api_key);
+        $today     = date('Y-m-d');
+        $succ      = $is_ok ? 1 : 0;
+        $err       = $is_ok ? 0 : 1;
+        $clean_err = $is_ok ? null : mb_substr(trim($err_msg), 0, 250, 'UTF-8');
+
+        $sql = "
+            INSERT INTO ai_key_stats
+            (key_hash, key_masked, total_calls, success_calls, error_calls, today_calls, last_call_date, translate_calls, exam_calls, last_http_code, last_model, last_error)
+            VALUES (?, ?, 1, ?, ?, 1, ?, 1, 0, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+                key_masked      = VALUES(key_masked),
+                total_calls     = total_calls + 1,
+                success_calls   = success_calls + VALUES(success_calls),
+                error_calls     = error_calls + VALUES(error_calls),
+                today_calls     = IF(last_call_date = VALUES(last_call_date), today_calls + 1, 1),
+                last_call_date  = VALUES(last_call_date),
+                translate_calls = translate_calls + 1,
+                last_http_code  = VALUES(last_http_code),
+                last_model      = VALUES(last_model),
+                last_error      = IF(VALUES(error_calls) > 0, VALUES(last_error), last_error)
+        ";
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([$hash, $masked, $succ, $err, $today, (int)$http_code, $model_name, $clean_err]);
+    } catch (Exception $ignore) {}
 }
 
 function extract_fallback_academic_keywords($english_text) {
@@ -221,7 +280,7 @@ function translate_via_mymemory($text, $source = 'en', $target = 'fa') {
             CURLOPT_IPRESOLVE      => CURL_IPRESOLVE_V4,
             CURLOPT_SSL_VERIFYPEER => false,
             CURLOPT_SSL_VERIFYHOST => 0,
-            CURLOPT_USERAGENT      => 'Mozilla/5.0 (AcademicPaperReader/3.8)'
+            CURLOPT_USERAGENT      => 'Mozilla/5.0 (AcademicPaperReader/4.3)'
         ]);
         $res = curl_exec($ch);
         $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
@@ -241,8 +300,8 @@ function translate_via_mymemory($text, $source = 'en', $target = 'fa') {
     return ['ok' => true, 'text' => implode(' ', $final_translation), 'keywords' => []];
 }
 
-// ۳. ارسال درخواست به یک مدل و کلید مشخص هوش مصنوعی
-function call_single_ai_key($text, $task_mode, $provider, $api_key, $model_name, $openai_endpoint) {
+// ۳. ارسال درخواست به یک مدل و کلید مشخص هوش مصنوعی (همراه با ثبت مصرف در ai_key_stats)
+function call_single_ai_key($pdo, $text, $task_mode, $provider, $api_key, $model_name, $openai_endpoint) {
     if ($task_mode === 'summarize') {
         $system_prompt = "تو یک استاد دانشگاه و دستیار پژوهشی هستی. "
             . "متن انگلیسی زیر را بخوان و «پیام کلیدی و نتیجه‌گیری علمی» آن را به زبان فارسی روان و خلاصه (در ۱ تا ۳ نکته کوتاه با علامت •) بنویس. "
@@ -262,7 +321,6 @@ function call_single_ai_key($text, $task_mode, $provider, $api_key, $model_name,
         $model = preg_replace('#^models/#i', '', $model);
 
         $url = "https://generativelanguage.googleapis.com/v1beta/models/" . urlencode($model) . ":generateContent?key=" . urlencode($api_key);
-
         $combined_prompt = $system_prompt . "\n\nمتن انگلیسی جهت پردازش:\n" . $text;
 
         $payload = [
@@ -301,10 +359,12 @@ function call_single_ai_key($text, $task_mode, $provider, $api_key, $model_name,
         curl_close($ch);
 
         if ($http_code === 0 || $res === false) {
+            $err_str = 'Timeout (' . ($curl_err ?: 'سرور پاسخ نداد') . ')';
+            log_translate_ai_key_stat($pdo, $api_key, false, 0, $model, $err_str);
             return [
                 'ok'        => false,
                 'http_code' => 0,
-                'error'     => 'Timeout (' . ($curl_err ?: 'سرور پاسخ نداد') . ')'
+                'error'     => $err_str
             ];
         }
 
@@ -322,6 +382,7 @@ function call_single_ai_key($text, $task_mode, $provider, $api_key, $model_name,
             }
             $collected_text = trim($collected_text);
             if (!empty($collected_text)) {
+                log_translate_ai_key_stat($pdo, $api_key, true, 200, $model);
                 return [
                     'ok'        => true,
                     'http_code' => 200,
@@ -331,10 +392,12 @@ function call_single_ai_key($text, $task_mode, $provider, $api_key, $model_name,
             }
         }
 
+        $err_msg = $data['error']['message'] ?? "HTTP {$http_code}";
+        log_translate_ai_key_stat($pdo, $api_key, false, $http_code, $model, $err_msg);
         return [
             'ok'        => false,
             'http_code' => $http_code,
-            'error'     => $data['error']['message'] ?? "HTTP {$http_code}"
+            'error'     => $err_msg
         ];
     } else {
         $endpoint = !empty($openai_endpoint) ? $openai_endpoint : 'https://api.openai.com/v1/chat/completions';
@@ -373,11 +436,14 @@ function call_single_ai_key($text, $task_mode, $provider, $api_key, $model_name,
         curl_close($ch);
 
         if ($http_code === 0 || $res === false) {
-            return ['ok' => false, 'http_code' => 0, 'error' => $curl_err ?: 'Timeout'];
+            $err_str = $curl_err ?: 'Timeout';
+            log_translate_ai_key_stat($pdo, $api_key, false, 0, $model, $err_str);
+            return ['ok' => false, 'http_code' => 0, 'error' => $err_str];
         }
 
         $data = json_decode($res, true);
         if ($http_code === 200 && isset($data['choices'][0]['message']['content'])) {
+            log_translate_ai_key_stat($pdo, $api_key, true, 200, $model);
             return [
                 'ok'        => true,
                 'http_code' => 200,
@@ -386,16 +452,18 @@ function call_single_ai_key($text, $task_mode, $provider, $api_key, $model_name,
             ];
         }
 
+        $err_msg = $data['error']['message'] ?? "HTTP {$http_code}";
+        log_translate_ai_key_stat($pdo, $api_key, false, $http_code, $model, $err_msg);
         return [
             'ok'        => false,
             'http_code' => $http_code,
-            'error'     => $data['error']['message'] ?? "HTTP {$http_code}"
+            'error'     => $err_msg
         ];
     }
 }
 
 // ۴. چرخش هوشمند بین مدل‌های فعال موجود در اکانت شما
-function translate_via_ai_pool($text, $task_mode = 'translate') {
+function translate_via_ai_pool($pdo, $text, $task_mode = 'translate') {
     $keys_pool = get_valid_ai_keys_pool();
     if (empty($keys_pool)) {
         return ['ok' => false, 'error' => 'هیچ کلید API فعالی در config.php تنظیم نشده است.'];
@@ -427,8 +495,8 @@ function translate_via_ai_pool($text, $task_mode = 'translate') {
     $last_error = '';
 
     foreach ($candidate_models as $current_model) {
-        foreach ($keys_pool as $index => $api_key) {
-            $attempt = call_single_ai_key($text, $task_mode, $provider, $api_key, $current_model, $endpoint);
+        foreach ($keys_pool as $api_key) {
+            $attempt = call_single_ai_key($pdo, $text, $task_mode, $provider, $api_key, $current_model, $endpoint);
             if ($attempt['ok']) {
                 $raw_output = $attempt['raw_text'];
                 $main_text  = $raw_output;
@@ -667,7 +735,6 @@ try {
         $source_hash = md5(strtolower($clean_text));
         $cache_engine_key = ($task_mode === 'summarize') ? 'ai_summary' : $engine;
 
-        // ۱. بررسی کش دیتابیس
         $cacheStmt = $pdo->prepare("SELECT translated_text, keywords_json FROM translation_cache WHERE source_hash = ? AND engine = ? LIMIT 1");
         $cacheStmt->execute([$source_hash, $cache_engine_key]);
         $cached_row = $cacheStmt->fetch();
@@ -688,7 +755,6 @@ try {
 
         $used_fallback_due_to_overload = false;
 
-        // ۲. پردازش با هوش مصنوعی یا موتورهای رایگان
         if ($task_mode === 'summarize' || $engine === 'ai') {
             $ai_enabled = defined('AI_TRANSLATION_ENABLED') ? (bool)AI_TRANSLATION_ENABLED : false;
             if (!$ai_enabled) {
@@ -704,7 +770,7 @@ try {
                     exit;
                 }
 
-                $result = translate_via_ai_pool($clean_text, $task_mode);
+                $result = translate_via_ai_pool($pdo, $clean_text, $task_mode);
                 if ($result['ok']) {
                     $active_m = $result['model'] ?? 'AI';
                     $engine_used = ($task_mode === 'summarize')
@@ -759,7 +825,6 @@ try {
 
         $keywords = $result['keywords'] ?? [];
 
-        // ۳. ذخیره در کش دیتابیس
         if (!$used_fallback_due_to_overload) {
             try {
                 $insCache = $pdo->prepare("

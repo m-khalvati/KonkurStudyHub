@@ -225,6 +225,9 @@ $initial_sub = function_exists('get_user_subscription_info')
                 <a href="paper_reader.php" class="px-2.5 md:px-3.5 py-1.5 rounded-lg text-xs font-bold text-emerald-300 hover:text-white transition">
                     🌐 مقاله‌خوان
                 </a>
+                <a href="exam.php" class="px-2.5 md:px-3.5 py-1.5 rounded-lg text-xs font-bold text-rose-300 hover:text-white transition">
+                    📝 آزمون‌ها
+                </a>
             </nav>
         </div>
 

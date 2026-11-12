@@ -1,157 +1,117 @@
-# 📚 Konkur Study Hub, Interactive PDF Annotator & AI Academic Paper Reader (v3.8)
+# 🎯 Smart Konkur Study Planner, PDF Booklet Studio, Academic Paper Reader & AI Exam LMS (v4.3)
 
-![Version](https://img.shields.io/badge/Version-3.8.0-indigo?style=flat-square)
-![PHP](https://img.shields.io/badge/PHP-7.4%2B%20%7C%208.x-777BB4?style=flat-square&logo=php&logoColor=white)
-![MySQL](https://img.shields.io/badge/MySQL-5.7%2B%20%7C%20MariaDB-4479A1?style=flat-square&logo=mysql&logoColor=white)
-![TailwindCSS](https://img.shields.io/badge/Tailwind_CSS-3.x-38B2AC?style=flat-square&logo=tailwind-css&logoColor=white)
-![PDF.js](https://img.shields.io/badge/Mozilla-PDF.js_3.11-FF7139?style=flat-square&logo=firefox&logoColor=white)
-![Gemini AI](https://img.shields.io/badge/Google_Gemini-Multi--Key_Pool-4285F4?style=flat-square&logo=google&logoColor=white)
-
-A full-stack, multi-user educational SaaS platform and academic research suite built with **PHP**, **MySQL**, **Tailwind CSS**, and **PDF.js**.  
-Originally engineered for university entrance exam preparation (targeting **16 Bahman**) and graduate-level academic research, this platform unifies four core modules into a single high-performance web application:
-1. **Smart Jalali Study Calendar** with side-by-side collision layout and negative-marking test analytics.
-2. **Interactive Booklet PDF Reader** with subject folders and normalized canvas drawing/highlighting.
-3. **AI-Powered Academic Paper Reader (`paper_reader.php`)** featuring a custom **Dot-to-Dot (Sentence-by-Sentence)** two-column layout parser, multi-engine translation, multi-voice TTS, and Word/PDF research note exporting.
-4. **Freemium / VIP Subscription & Admin Management System** with automated **SMS.ir** overdue task alerts and Telegram order deep-linking.
+An all-in-one, offline-resilient **PHP & MySQL** web application designed for university entrance exam (**Konkur**) preparation and academic research. The platform combines an interactive **Jalali/Gregorian Study Calendar**, a **Vector PDF Annotation & Booklet Studio**, a **Dual-Column Academic Paper Reader with Multi-Engine AI Translation**, and an **Autonomous AI Exam Generator & Online Testing Suite**.
 
 ---
 
 ## ✨ Key Features
 
-### 1. 🌐 AI Academic Paper Reader & Dot-to-Dot Translator (`paper_reader.php`)
-* **Strict Two-Column Isolation & Dot-to-Dot Segmentation:** Custom spatial clustering algorithm that detects central column gutters in IEEE/Elsevier double-column papers, orders reading zones naturally (*Top Full-Width* ➔ *Left Column* ➔ *Right Column*), and slices paragraphs from **previous period to next period** while ignoring academic abbreviations (`et al.`, `Fig.`, `Eq.`, `e.g.`, `i.e.`, decimals).
-* **Dual Granularity Modes & Sequential Navigation:** Switch on the fly between **🎯 Sentence Mode (Dot-to-Dot)** and **📄 Paragraph Mode**, or step through sentences sequentially using the **Next / Previous Sentence** controls.
-* **Multi-Engine Translation Gateway (`api_translate.php`):**
-  * **Google Translate GTX (Free):** Sub-second translation for general reading.
-  * **MyMemory API (Free):** Translation memory engine with automatic chunking.
-  * **Academic AI Engine (VIP):** Powered by a **Multi-Key & Multi-Model Rotation Pool** (`gemini-3.7-flash`, `gemini-3.6-flash`, `gemini-3.5-flash`, `gemma-4-31b-it`). Preserves technical English terminology in parentheses—e.g., `مطالعه حذفی (Ablation Study)`—and automatically falls back if a model experiences `HTTP 503 / 429` load spikes.
-* **Key Takeaway Summarizer & Academic Vocabulary Extractor:** One-click AI summarization (`✨ پیام کلیدی و خلاصه`) that condenses complex paragraphs into bulleted insights and extracts 3–5 interactive academic keyword pills with click-to-pronounce audio.
-* **Multi-Voice & Multi-Speed TTS Audio Bar:** Built-in Web Speech synthesizer supporting all system English voices (`US`, `UK`, male/female operators), 5 playback speeds (`0.5x` to `1.5x`), Play/Pause/Resume/Stop controls, and instant inline substring lookup (`🔍 معنی فوری`).
-* **Visual Reading & Note Tracking on PDF:** Highlights active sentences in deep indigo, visited sentences in soft sky blue, and saved research notes in emerald green with a `📌` badge directly on the PDF canvas.
-* **Export Research Notes to Word (`.doc`) & Printable PDF:** Searchable research notebook per paper with one-click export to formatted Microsoft Word documents and Vazirmatn-styled printable PDF reports.
+### 1. 📅 Interactive Jalali Study Calendar (`index.php` & `api_calendar.php`)
+* **Google-Calendar-Style Interactions:**
+  * **Drag & Drop Tasks:** Smoothly drag tasks across hours or between different days of the week on both desktop (mouse) and mobile (touch long-press) with 15-minute snap intervals.
+  * **Interactive Resize Handle (`═`):** Drag the bottom edge of any task card to extend or shorten its duration in real time.
+  * **Drag-to-Create:** Drag across empty time slots on the calendar grid to visually select a time range and open the task creation modal pre-filled with the exact start and end times.
+* **Konkur Test Score Calculator:** Built-in negative-marking percentage calculator:
+  $$\text{Score (\%)} = \frac{(3 \times \text{Correct}) - \text{Wrong}}{3 \times \text{Total}} \times 100$$
+* **Weekly Analytics & Overdue Backlog:** Visual bar charts comparing planned vs. completed study hours per day, category breakdown, and one-click rescheduling for overdue tasks.
+* **Linked Pomodoro & Stopwatch Timer:** Start a 25-minute Pomodoro timer directly linked to a specific calendar task and mark it complete upon finishing.
+* **Automated SMS Reminders (`cron_sms.php`):** Optional SMS alerts for overdue tasks (opt-in per task; disabled by default).
 
-### 2. 📅 Smart Jalali Study Calendar (Locked to 16 Bahman)
-* **Weekly & Mobile-First Daily Views:** 24-hour time grid (`00:00` to `23:59`) with a live current-time indicator and a 7-day quick-switch strip on mobile.
-* **Side-by-Side Overlap Engine:** Automatically places concurrent tasks in equal side-by-side columns with live conflict warnings inside the scheduling modal.
-* **Custom User Categories & Separated Analytics:** 5 default categories plus custom user-defined categories and a 10-color palette. Strictly separates **Pure Study Hours (📚)** from **Miscellaneous Tasks (🧩)** in all progress bars.
-* **Konkur Negative-Marking Calculator:** Calculates $\frac{(\text{Correct} \times 3) - \text{Wrong}}{\text{Total} \times 3} \times 100$ and displays test score badges on calendar cards.
-* **Productivity Suite:** Routine weekly task repetition, one-click **"Move to Tomorrow"**, **"Copy Full Day Schedule"**, and integrated **Pomodoro / Stopwatch Timer**.
+### 2. 📚 PDF Booklet Reader & Vector Annotation Studio (`index.php` & `api_pdf.php`)
+* **True Edge-to-Edge Fullscreen & Centered Mobile Viewport:** Automatically centers PDF pages vertically and horizontally on mobile screens with breathing room for effortless zooming.
+* **Pinch-to-Zoom & Double-Tap Zoom:** Locks zoom focal points directly under the user's fingers. Smart 2-finger pan/zoom detection prevents accidental pen strokes while zooming.
+* **Rich Annotation Studio:**
+  * **100% Opaque Pens & Whiteout Tool:** Includes charcoal black, ballpoint blue, red, dark green, purple, orange, custom color picker, and an **opaque whiteout pen** (ideal for covering answer keys during practice).
+  * **Ruler (Straight Line) & Formula Box (Rectangle):** Draw crisp underlines and rectangular boxes around formulas.
+  * **4 Stroke Thicknesses, Sticky Notes (`📌`), Undo & Eraser.**
+  * **Snapshot Export (`📸`):** Merge the rendered PDF page and vector annotations into a downloadable high-resolution `PNG` image.
 
-### 3. 📖 Interactive Booklet PDF Reader (`index.php`)
-* **Zero-Error Binary Streaming (`HTTP 412` Proof):** Streams PDFs as raw binary `Uint8Array` buffers with multi-CDN fallback (`jsDelivr` ➔ `unpkg`) and isolated `LTR` canvas contexts for flawless Persian and English font rendering.
-* **Accordion Subject Folders:** Organize booklets into color-coded subject folders with direct per-folder uploads.
-* **Normalized Canvas Annotations:** Highlighter, Freehand Pen, Sticky Notes, and Eraser stored as normalized JSON coordinates (`0.0`–`1.0`) in MySQL, plus Starred Pages (`⭐`) and Night Mode (`🌙`).
+### 3. 🌐 Academic Paper Reader & Smart Translator (`paper_reader.php` & `api_translate.php`)
+* **2-Column Layout & Sentence-Boundary Detection:** Extracts interactive sentence (`🎯`) and paragraph (`📄`) bounding boxes using percentage-based (`%`) coordinates that stay locked onto words at any zoom level.
+* **Multi-Engine Translation & AI Summarizer:**
+  * Supports **Google GTX**, **MyMemory**, and **Gemini AI Pool** (`gemini-3.7-flash` / `gemini-3.5-flash`) with automatic model & key rotation and permanent MySQL caching.
+  * Extracts academic terminology (`English: Persian`) and key scientific takeaways (`✨ پیام کلیدی`).
+* **Smart Auto-Advance & Background Pre-fetching:**
+  * Customizable reading speed slider (`3s` to `25s`) with **Background Pre-fetching**—while reading the current sentence, the next sentence is translated in the background for `0ms` transition latency.
+  * Multi-voice, multi-speed (`0.5x`–`1.5x`) English **Text-to-Speech (TTS)** synchronization.
+* **Research Notes (Fiching):** Save translated segments with personal notes and export the entire collection to **Microsoft Word (`.doc`)** or **Printable PDF**.
 
-### 4. 👑 Freemium / VIP Subscription & Admin Dashboard (`admin.php`)
-* **Free vs. VIP Quotas:**
-  * **Free Users:** Up to **1 PDF file** (max **3 MB**), free translation engines (Google & MyMemory), full calendar & annotation tools.
-  * **VIP Users (1-Month & 3-Month Plans):** **Unlimited PDF & Paper uploads** (up to **64 MB** per file), **AI Academic Translator & Summarizer**, and **automated SMS.ir overdue task alerts**.
-* **Cumulative Renewal & Non-Destructive Locking:** Early renewals add days (`+30` or `+90`) to the existing expiration timestamp. After expiration, extra files are safely locked (`🔒`) rather than deleted.
-* **Telegram Deep-Linking & Instant Promo Codes:** Pre-filled Telegram order links with user metadata alongside instant one-time promo code redemption (`VIP30-XXXX` / `VIP90-XXXX`).
+### 4. 📝 Autonomous AI Exam Studio & Online Exam Runner (`admin.php`, `exam.php`, `api_exam.php`)
+* **Multi-Page AI Question Crawler:** Load a multi-page test PDF in the Admin Studio, set a page range, and let the crawler automatically render each page, extract 4-option multiple-choice questions via **Gemini Vision OCR**, and save them directly to the database.
+* **Automatic Figure Cropping (`figure_box`):** Gemini Vision detects diagrams, circuits, charts, or tables in the PDF page and returns normalized bounding-box coordinates (`[ymin, xmin, ymax, xmax]`), which the browser automatically crops and attaches to the corresponding question.
+* **Pseudocode & Algorithm Formatting:** Automatically wraps pseudocode and code snippets in `LTR` monospace blocks (` ``` `) with preserved indentation.
+* **Interactive Manual Crop & Bulk Answer Key Importer:** Draw a box on any PDF page to extract a single question, attach a diagram, or create a full-image question in one click. Update all correct options at once using sequential (`3 1 4 2`) or paired (`1-3, 2-1`) answer key strings.
+* **Student Exam Environment (`exam.php`):** Features Single-Question and Booklet view modes, an interactive **Bubble Answer Sheet**, question flagging (`🚩`), countdown timer, instant Konkur report card, explanatory answer review, and automatic score logging into the user's study calendar.
+
+### 5. 🛡️ Offline-First Asset Localization & AI Key Pool Telemetry (`setup_assets.php` & `admin.php`)
+* **100% Local Asset Hosting:** Run `setup_assets.php` once to download Tailwind CSS, Vazirmatn `.woff2` fonts, and `PDF.js` (`pdf.min.js` + `pdf.worker.min.js`) directly into the local `assets/` directory so the UI never breaks during external CDN outages.
+* **AI Key Pool Dashboard:** Real-time admin telemetry tracking total calls, today's calls, `200 OK` vs. error rates, module breakdown (Translator vs. Exam Studio), and live latency ping tests (`ms`) for every API key in `config.php`.
 
 ---
 
 ## 🗂️ Project Structure
 
 ```text
-konkur-study-hub/
-├── admin.php             # Admin dashboard (User management, 1-click VIP charging & code generator)
-├── api_calendar.php      # AJAX endpoint for calendar CRUD, custom categories, copy-day & stats
-├── api_pdf.php           # AJAX endpoint for binary booklet streaming, folders, quotas & annotations
-├── api_subscription.php  # AJAX endpoint for redeeming VIP codes & admin subscription actions
-├── api_translate.php     # Multi-engine translation gateway (Google, MyMemory, AI Pool, Cache & Notes)
-├── auth.php              # Multi-user authentication (Login / Registration with mobile number)
-├── config.example.php    # Configuration template (Database, SMS.ir, AI Key Pool & VIP quotas)
-├── cron_sms.php          # Background cron script for sending SMS.ir template alerts to VIP users
-├── database.sql          # Complete MySQL database schema (9 relational tables)
-├── index.php             # Main dashboard (Smart Jalali Calendar + Booklet PDF Reader + Pomodoro)
-├── paper_reader.php      # Standalone AI Academic Paper Reader (Dot-to-Dot parser, TTS & Word/PDF export)
-├── uploads/              # Writable directory for uploaded PDFs (auto-protected against HTTP 412)
-│   └── papers/           # Dedicated subdirectory for English academic papers
-└── README.md             # Project documentation
+├── config.php               # Database, AI keys pool, SMS & VIP tier configuration
+├── auth.php                 # User registration, login & session authentication
+├── index.php                # Interactive Study Calendar + PDF Booklet Studio
+├── paper_reader.php         # Academic Paper Reader & Smart Translator
+├── exam.php                 # Online Exam Lobby, Runner, Bubble Sheet & Report Card
+├── admin.php                # Admin Panel: AI Exam Studio, AI Key Pool Monitor & VIP Management
+├── setup_assets.php         # One-click Offline Asset Localizer (Tailwind, Fonts, PDF.js)
+├── api_calendar.php         # REST API for Calendar CRUD, Drag/Resize & Analytics
+├── api_pdf.php              # REST API for PDF streaming, folders & vector annotations
+├── api_translate.php        # REST API for Multi-Engine Translation, AI Pool & Research Notes
+├── api_exam.php             # REST API for AI Vision OCR, Exam CRUD & Grading
+├── api_subscription.php     # REST API for Promo Code Redemption & VIP Status
+├── cron_sms.php             # Automated Cron Job for Overdue Task SMS Alerts
+├── database.sql             # Full MySQL Database Schema (13 Tables)
+├── assets/                  # Locally hosted CSS, Vazirmatn fonts & PDF.js worker
+└── uploads/                 # Protected user storage (pdfs/, papers/, exams/)
 ```
 
 ---
 
-## 🗄️ Database Schema Overview (9 Tables)
+## 🚀 Installation & Deployment Guide
 
-| # | Table Name | Purpose | Key Columns |
-| :- | :--- | :--- | :--- |
-| 1 | **`users`** | User accounts, mobile numbers, admin role & VIP expiry | `id`, `username`, `phone`, `is_admin`, `vip_expires_at` |
-| 2 | **`subscription_codes`** | One-time redeemable 1-month and 3-month VIP codes | `id`, `code`, `plan_type`, `days`, `is_used`, `used_by` |
-| 3 | **`pdf_folders`** | Subject folders for organizing study booklets | `id`, `user_id`, `name`, `color` |
-| 4 | **`pdfs`** | Booklets (`is_paper=0`) and academic papers (`is_paper=1`) | `id`, `user_id`, `folder_id`, `is_paper`, `file_path`, `starred_pages` |
-| 5 | **`pdf_annotations`** | Per-page normalized canvas drawings & sticky notes | `id`, `user_id`, `pdf_id`, `page_number`, `annotation_data` |
-| 6 | **`calendar_categories`** | User-defined custom task categories and colors | `id`, `user_id`, `name`, `color`, `is_study` |
-| 7 | **`calendar_events`** | Scheduled tasks up to 16 Bahman, SMS state & test scores | `id`, `user_id`, `g_date`, `j_date`, `is_study`, `send_sms`, `test_percent` |
-| 8 | **`translation_cache`** | MD5-indexed cache for translations, AI summaries & keywords | `id`, `source_hash`, `engine`, `translated_text`, `keywords_json` |
-| 9 | **`paper_notes`** | Saved research notes linked to specific paper sentences | `id`, `user_id`, `pdf_id`, `page_number`, `para_hash`, `translated_text` |
+### 1. Database Setup
+1. Create a MySQL database with `utf8mb4_persian_ci` collation.
+2. Import [`database.sql`](database.sql) via **phpMyAdmin** or CLI:
+   ```bash
+   mysql -u your_db_user -p your_db_name < database.sql
+   ```
+   *(Note: All core PHP endpoints also include idempotent auto-migration blocks that automatically create missing tables or columns on first run).*
 
----
+### 2. Configuration (`config.php`)
+Update your database credentials, Gemini API keys pool, and SMS credentials in `config.php`:
+```php
+define('DB_HOST', 'localhost');
+define('DB_NAME', 'your_db_name');
+define('DB_USER', 'your_db_user');
+define('DB_PASS', 'your_db_password');
 
-## 🚀 Installation & Setup Guide
+// Multi-Key Gemini AI Pool (Automatic Rotation & Failover)
+define('AI_TRANSLATION_ENABLED', true);
+define('AI_VIP_ONLY', true);
+define('AI_PROVIDER', 'gemini');
+define('AI_MODEL_NAME', 'gemini-3.7-flash');
+define('AI_API_KEYS', [
+    'YOUR_GEMINI_API_KEY_1',
+    'YOUR_GEMINI_API_KEY_2',
+]);
+```
 
-### Prerequisites
-* **PHP** 7.4 or 8.x (with `pdo_mysql`, `curl`, `fileinfo`, and `mbstring` extensions enabled)
-* **MySQL** 5.7+ or **MariaDB**
-* Web Server: Apache / LiteSpeed / Nginx (XAMPP, Laragon, or cPanel / DirectAdmin shared hosting)
+### 3. Localize Frontend Assets (`setup_assets.php`)
+1. Register the first user account via `auth.php` (User ID `1` is automatically granted Admin privileges).
+2. Open `[https://yourdomain.com/setup_assets.php](https://yourdomain.com/setup_assets.php)` in your browser and click **"🚀 دانلود فایل‌ها روی هاست و بومی‌سازی خودکار کل صفحات"** to store all CSS, fonts, and PDF.js files locally inside `assets/`.
 
-### Step 1: Clone the Repository
+### 4. Cron Job for Overdue Task Notifications (Optional)
+To enable automated SMS reminders for overdue study sessions, configure a Cron Job in cPanel / DirectAdmin every 15 minutes:
 ```bash
-git clone [https://github.com/YOUR_USERNAME/konkur-study-hub.git](https://github.com/YOUR_USERNAME/konkur-study-hub.git)
-cd konkur-study-hub
+*/15 * * * * curl -s "https://yourdomain.com/cron_sms.php" > /dev/null 2>&1
 ```
-
-### Step 2: Create & Import the MySQL Database
-1. Create a new MySQL database with `utf8mb4_persian_ci` collation:
-   ```sql
-   CREATE DATABASE konkur_db CHARACTER SET utf8mb4 COLLATE utf8mb4_persian_ci;
-   ```
-2. Import `database.sql` via **phpMyAdmin** or CLI:
-   ```bash
-   mysql -u your_username -p konkur_db < database.sql
-   ```
-
-### Step 3: Configure `config.php`
-1. Duplicate `config.example.php` and rename it to `config.php`:
-   ```bash
-   cp config.example.php config.php
-   ```
-2. Open `config.php` and configure your database credentials, Telegram ID, `sms.ir` API key, and your Gemini API key pool:
-   ```php
-   // 1. Database Credentials
-   define('DB_HOST', 'localhost');
-   define('DB_NAME', 'konkur_db');
-   define('DB_USER', 'your_mysql_user');
-   define('DB_PASS', 'your_mysql_password');
-
-   // 2. VIP Subscription & Telegram Sales Config
-   define('TELEGRAM_SALES_ID', 'YourTelegramID'); // Without @
-   define('FREE_MAX_PDF_COUNT', 1);
-   define('FREE_MAX_PDF_MB', 3);
-   define('VIP_MAX_PDF_MB', 64);
-
-   // 3. AI Academic Paper Translator (Multi-Key Pool)
-   define('AI_TRANSLATION_ENABLED', true);
-   define('AI_VIP_ONLY', true);
-   define('AI_PROVIDER', 'gemini');
-   define('AI_MODEL_NAME', 'gemini-3.7-flash');
-   define('AI_API_KEYS', [
-       'YOUR_GEMINI_API_KEY_1',
-       'YOUR_GEMINI_API_KEY_2',
-   ]);
-   ```
-
-### Step 4: Directory Permissions & Upload Limits
-1. Ensure `uploads/` and `uploads/papers/` are writable (`chmod 755`).
-2. To allow VIP users to upload large PDFs (up to 64MB), add these lines to `.user.ini` or `php.ini`:
-   ```ini
-   upload_max_filesize = 64M
-   post_max_size = 64M
-   max_execution_time = 300
-   ```
 
 ---
 
 ## 📄 License
-This project is open-source and available under the [MIT License](https://opensource.org/licenses/MIT).
+Developed for educational, academic research, and Konkur exam preparation workflows.

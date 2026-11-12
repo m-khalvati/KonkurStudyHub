@@ -1,14 +1,17 @@
-# جلوگیری از آپلود فایل تنظیمات حاوی رمز دیتابیس هاست واقعی
+# Sensitive Configuration (API Keys & DB Credentials)
 config.php
 
-# نادیده گرفتن فایل‌های PDF آپلود شده توسط کاربران (اما حفظ خود پوشه uploads)
+# User Uploaded Files (Keep folder structure, ignore user files)
 uploads/*
 !uploads/.gitkeep
+uploads/pdfs/*
+uploads/papers/*
+uploads/exams/*
 
-# فایل‌های سیستمی و محیط توسعه
+# System & IDE Files
 .DS_Store
 Thumbs.db
 .vscode/
 .idea/
 *.log
-*.zip
+error_log

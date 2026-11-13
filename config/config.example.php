@@ -1,5 +1,7 @@
 <?php
-session_start();
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
 date_default_timezone_set('Asia/Tehran');
 
 // ==========================================
@@ -75,6 +77,9 @@ try {
     }
     if (!in_array('vip_expires_at', $uCols)) {
         $pdo->exec("ALTER TABLE `users` ADD COLUMN `vip_expires_at` datetime DEFAULT NULL AFTER `is_admin`");
+    }
+    if (!in_array('api_token', $uCols)) {
+        $pdo->exec("ALTER TABLE `users` ADD COLUMN `api_token` varchar(128) DEFAULT NULL AFTER `vip_expires_at`, ADD UNIQUE INDEX `idx_users_api_token` (`api_token`)");
     }
 
     $pCols = $pdo->query("SHOW COLUMNS FROM `pdfs`")->fetchAll(PDO::FETCH_COLUMN);
@@ -321,3 +326,100 @@ function require_login() {
         exit;
     }
 }
+
+// ==========================================
+// ۱۰. پل ارتباطی و احراز هویت اپلیکیشن موبایل (Flutter)
+// ==========================================
+$helpers_file = dirname(__DIR__) . '/includes/helpers.php';
+if (is_file($helpers_file)) {
+    require_once $helpers_file;
+}
+
+if (!function_exists('setup_mobile_cors_and_json')) {
+    function setup_mobile_cors_and_json() {
+        if (!headers_sent()) {
+            header("Access-Control-Allow-Origin: *");
+            header("Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS");
+            header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, X-Client-Platform");
+        }
+
+        if (isset($_SERVER['REQUEST_METHOD']) && $_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+            http_response_code(200);
+            exit;
+        }
+
+        $content_type = $_SERVER['CONTENT_TYPE'] ?? ($_SERVER['HTTP_CONTENT_TYPE'] ?? '');
+        if (stripos($content_type, 'application/json') !== false) {
+            $raw_input = file_get_contents('php://input');
+            $json_data = json_decode($raw_input, true);
+            if (is_array($json_data)) {
+                $_POST = array_merge($_POST, $json_data);
+            }
+        }
+    }
+}
+
+if (!function_exists('get_request_api_token')) {
+    function get_request_api_token() {
+        $auth_header = null;
+
+        if (!empty($_SERVER['Authorization'])) {
+            $auth_header = trim($_SERVER['Authorization']);
+        } elseif (!empty($_SERVER['HTTP_AUTHORIZATION'])) {
+            $auth_header = trim($_SERVER['HTTP_AUTHORIZATION']);
+        } elseif (!empty($_SERVER['REDIRECT_HTTP_AUTHORIZATION'])) {
+            $auth_header = trim($_SERVER['REDIRECT_HTTP_AUTHORIZATION']);
+        } elseif (function_exists('apache_request_headers')) {
+            $headers = apache_request_headers();
+            if (is_array($headers)) {
+                foreach ($headers as $key => $val) {
+                    if (strtolower($key) === 'authorization') {
+                        $auth_header = trim($val);
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (!empty($auth_header) && preg_match('/Bearer\s+(\S+)/i', $auth_header, $matches)) {
+            return $matches[1];
+        }
+
+        if (!empty($_GET['api_token'])) {
+            return trim((string)$_GET['api_token']);
+        }
+        if (!empty($_POST['api_token'])) {
+            return trim((string)$_POST['api_token']);
+        }
+
+        return null;
+    }
+}
+
+if (!function_exists('authenticate_mobile_token')) {
+    function authenticate_mobile_token($pdo) {
+        setup_mobile_cors_and_json();
+
+        $token = get_request_api_token();
+        if (empty($token)) {
+            return;
+        }
+
+        try {
+            $stmt = $pdo->prepare("SELECT id, full_name, username, phone, is_admin FROM users WHERE api_token = ? LIMIT 1");
+            $stmt->execute([$token]);
+            $user = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            if ($user) {
+                $_SESSION['user_id']   = (int)$user['id'];
+                $_SESSION['full_name'] = $user['full_name'];
+                $_SESSION['username']  = $user['username'];
+                $_SESSION['phone']     = $user['phone'] ?? '';
+                $_SESSION['is_admin']  = (int)($user['is_admin'] ?? 0);
+            }
+        } catch (Exception $ignore) {}
+    }
+}
+
+authenticate_mobile_token($pdo);
+require_once dirname(__DIR__) . '/includes/helpers.php';

@@ -1,8 +1,6 @@
-
-
-# Backward-Compatible API & Cron Routing
 <IfModule mod_rewrite.c>
     RewriteEngine On
-    RewriteRule ^api_(calendar|pdf|translate|exam|courses|subscription)\.php$ api/api_$1.php [L,QSA]
-    RewriteRule ^cron_sms\.php$ cron/cron_sms.php [L,QSA]
+    # انتقال هدر Authorization از اپلیکیشن فلاتر به PHP
+    RewriteCond %{HTTP:Authorization} ^(.*)
+    RewriteRule .* - [e=HTTP_AUTHORIZATION:%1]
 </IfModule>

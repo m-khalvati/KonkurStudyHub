@@ -19,9 +19,11 @@ CREATE TABLE IF NOT EXISTS `users` (
   `password_hash` varchar(255) NOT NULL,
   `is_admin` tinyint(1) NOT NULL DEFAULT 0 COMMENT '1=مدیر کل, 0=کاربر',
   `vip_expires_at` datetime DEFAULT NULL COMMENT 'تاریخ انقضای اشتراک ویژه',
+  `api_token` varchar(128) DEFAULT NULL COMMENT 'توکن احراز هویت اپلیکیشن موبایل',
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_username` (`username`),
+  UNIQUE KEY `idx_users_api_token` (`api_token`),
   KEY `idx_phone` (`phone`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_persian_ci;
 

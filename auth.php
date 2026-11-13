@@ -1,13 +1,95 @@
 <?php
 require_once __DIR__ . '/config/config.php';
 
+// تشخیص اینکه آیا درخواست از سمت اپلیکیشن موبایل (Flutter) ارسال شده است یا مرورگر وب
+$is_mobile_api = (
+    (isset($_SERVER['HTTP_X_CLIENT_PLATFORM']) && strtolower($_SERVER['HTTP_X_CLIENT_PLATFORM']) === 'flutter') ||
+    (isset($_GET['client']) && $_GET['client'] === 'flutter') ||
+    (isset($_POST['client']) && $_POST['client'] === 'flutter') ||
+    (isset($_SERVER['HTTP_ACCEPT']) && strpos($_SERVER['HTTP_ACCEPT'], 'application/json') !== false)
+);
+
+// تابع کمکی برای تولید یا دریافت توکن امن کاربر و ارسال پاسخ JSON به فلاتر
+function send_flutter_auth_response(PDO $pdo, array $user, string $message = 'عملیات با موفقیت انجام شد.') {
+    $token = $user['api_token'] ?? null;
+    if (empty($token)) {
+        $token = bin2hex(random_bytes(32));
+        $upd = $pdo->prepare("UPDATE users SET api_token = ? WHERE id = ?");
+        $upd->execute([$token, (int)$user['id']]);
+    }
+
+    $sub_info = get_user_subscription_info($pdo, (int)$user['id']);
+
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode([
+        'status'       => 'success',
+        'message'      => $message,
+        'token'        => $token,
+        'user'         => [
+            'id'        => (int)$user['id'],
+            'full_name' => $user['full_name'],
+            'username'  => $user['username'],
+            'phone'     => $user['phone'] ?? ''
+        ],
+        'subscription' => $sub_info,
+        'app_config'   => [
+            'days_to_konkur'     => defined('DAYS_TO_KONKUR') ? DAYS_TO_KONKUR : 0,
+            'konkur_jalali_date' => defined('KONKUR_JALALI_DATE') ? KONKUR_JALALI_DATE : '',
+            'telegram_sales_id'  => defined('TELEGRAM_SALES_ID') ? TELEGRAM_SALES_ID : '',
+            'plan_1m_price'      => defined('PLAN_1M_PRICE') ? PLAN_1M_PRICE : '',
+            'plan_3m_price'      => defined('PLAN_3M_PRICE') ? PLAN_3M_PRICE : ''
+        ]
+    ], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+// ==========================================
+// مدیریت درخواست‌های اختصاصی اپلیکیشن فلاتر (بررسی نشست و خروج)
+// ==========================================
+if ($is_mobile_api) {
+    $req_action = $_GET['action'] ?? ($_POST['action'] ?? '');
+
+    // ۱. بررسی اعتبار توکن و دریافت اطلاعات به‌روز کاربر در بدو باز شدن اپ (Splash Screen)
+    if ($req_action === 'me') {
+        header('Content-Type: application/json; charset=utf-8');
+        if (!isset($_SESSION['user_id'])) {
+            http_response_code(401);
+            echo json_encode(['status' => 'error', 'message' => 'نشست کاربری منقضی شده است. لطفاً مجدداً وارد شوید.'], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+        $stmt = $pdo->prepare("SELECT * FROM users WHERE id = ? LIMIT 1");
+        $stmt->execute([(int)$_SESSION['user_id']]);
+        $current_user = $stmt->fetch();
+        if (!$current_user) {
+            http_response_code(401);
+            echo json_encode(['status' => 'error', 'message' => 'کاربر یافت نشد.'], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+        send_flutter_auth_response($pdo, $current_user, 'اطلاعات حساب همگام‌سازی شد.');
+    }
+
+    // ۲. خروج از حساب در اپلیکیشن موبایل
+    if ($req_action === 'logout' || isset($_GET['logout'])) {
+        if (isset($_SESSION['user_id'])) {
+            $pdo->prepare("UPDATE users SET api_token = NULL WHERE id = ?")->execute([(int)$_SESSION['user_id']]);
+        }
+        session_destroy();
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode(['status' => 'success', 'message' => 'از حساب کاربری خارج شدید.'], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+}
+
+// ==========================================
+// روند عادی خروج و ریدایرکت در نسخه وب
+// ==========================================
 if (isset($_GET['logout'])) {
     session_destroy();
     header("Location: auth.php");
     exit;
 }
 
-if (isset($_SESSION['user_id'])) {
+if (!$is_mobile_api && isset($_SESSION['user_id'])) {
     header("Location: index.php");
     exit;
 }
@@ -37,8 +119,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $error = 'این نام کاربری قبلاً ثبت شده است.';
             } else {
                 $hash = password_hash($password, PASSWORD_DEFAULT);
-                $stmt = $pdo->prepare("INSERT INTO users (full_name, username, phone, password_hash) VALUES (?, ?, ?, ?)");
-                $stmt->execute([$full_name, $username, $phone, $hash]);
+                $api_token = bin2hex(random_bytes(32));
+                $stmt = $pdo->prepare("INSERT INTO users (full_name, username, phone, password_hash, api_token) VALUES (?, ?, ?, ?, ?)");
+                $stmt->execute([$full_name, $username, $phone, $hash, $api_token]);
+                $new_user_id = (int)$pdo->lastInsertId();
+
+                if ($is_mobile_api) {
+                    $new_user = [
+                        'id'        => $new_user_id,
+                        'full_name' => $full_name,
+                        'username'  => $username,
+                        'phone'     => $phone,
+                        'api_token' => $api_token
+                    ];
+                    send_flutter_auth_response($pdo, $new_user, 'ثبت‌نام با موفقیت انجام شد و وارد حساب شدید!');
+                }
+
                 $success = 'ثبت‌نام با موفقیت انجام شد! اکنون وارد شوید.';
             }
         }
@@ -55,12 +151,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $_SESSION['full_name'] = $user['full_name'];
                 $_SESSION['username']  = $user['username'];
                 $_SESSION['phone']     = $user['phone'] ?? '';
+
+                if ($is_mobile_api) {
+                    send_flutter_auth_response($pdo, $user, 'ورود با موفقیت انجام شد.');
+                }
+
                 header("Location: index.php");
                 exit;
             } else {
                 $error = 'نام کاربری یا رمز عبور اشتباه است.';
             }
         }
+    }
+
+    // بازگرداندن خطا به صورت JSON در صورتی که درخواست از سمت فلاتر باشد
+    if ($is_mobile_api && !empty($error)) {
+        header('Content-Type: application/json; charset=utf-8');
+        http_response_code(400);
+        echo json_encode([
+            'status'  => 'error',
+            'message' => $error
+        ], JSON_UNESCAPED_UNICODE);
+        exit;
     }
 }
 ?>

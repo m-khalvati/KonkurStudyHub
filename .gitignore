@@ -4,6 +4,7 @@ config.php
 # User & Admin Uploaded Files (Keep folder structure, ignore uploaded binaries)
 uploads/*
 !uploads/.gitkeep
+!uploads/.htaccess
 uploads/pdfs/*
 uploads/papers/*
 uploads/exams/*

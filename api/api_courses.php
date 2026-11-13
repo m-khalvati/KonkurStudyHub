@@ -1,12 +1,29 @@
 <?php
-require_once dirname(__DIR__) . '/config/config.php';
+// بارگذاری فایل تنظیمات از پوشه config/ (با پشتیبانی خودکار از مسیر ریشه در صورت عدم انتقال)
+$root_path = dirname(__DIR__);
+if (is_file($root_path . '/config/config.php')) {
+    require_once $root_path . '/config/config.php';
+} elseif (is_file(__DIR__ . '/config/config.php')) {
+    $root_path = __DIR__;
+    require_once __DIR__ . '/config/config.php';
+} elseif (is_file(__DIR__ . '/config.php')) {
+    $root_path = __DIR__;
+    require_once __DIR__ . '/config.php';
+} else {
+    http_response_code(500);
+    die(json_encode(['status' => 'error', 'message' => 'فایل تنظیمات یافت نشد.'], JSON_UNESCAPED_UNICODE));
+}
+
+if (is_file($root_path . '/includes/security_shield.php')) {
+    require_once $root_path . '/includes/security_shield.php';
+}
 
 @set_time_limit(120);
 header('Content-Type: application/json; charset=utf-8');
 
 if (!isset($_SESSION['user_id'])) {
     http_response_code(401);
-    echo json_encode(['status' => 'error', 'message' => 'لطفاً ابتدا وارد حساب کاربری خود شوید.']);
+    echo json_encode(['status' => 'error', 'message' => 'لطفاً ابتدا وارد حساب کاربری خود شوید.'], JSON_UNESCAPED_UNICODE);
     exit;
 }
 
@@ -30,9 +47,115 @@ $sub_info = function_exists('get_user_subscription_info')
 $is_admin = !empty($sub_info['is_admin']) || ($user_id === 1);
 
 // ====================================================
+// ۰. توابع امنیتی داخلی (Fallback در صورت عدم وجود security_shield.php)
+// ====================================================
+if (!function_exists('resolve_safe_upload_path')) {
+    function resolve_safe_upload_path(string $relative_path): ?string {
+        global $root_path;
+        $clean_rel = ltrim(str_replace(['\\', "\0"], ['/', ''], trim($relative_path)), '/');
+        if ($clean_rel === '' || strpos($clean_rel, '..') !== false) {
+            return null;
+        }
+        $uploads_root = realpath($root_path . '/uploads');
+        $target_real  = realpath($root_path . '/' . $clean_rel);
+        if (!$uploads_root || !$target_real || !is_file($target_real)) {
+            return null;
+        }
+        if (strpos($target_real, $uploads_root . DIRECTORY_SEPARATOR) !== 0) {
+            return null;
+        }
+        return $target_real;
+    }
+}
+
+if (!function_exists('safe_remote_curl_get')) {
+    function safe_remote_curl_get(string $url, int $max_bytes = 15728640): ?string {
+        $url = trim($url);
+        $parts = parse_url($url);
+        if (!$parts || empty($parts['scheme']) || empty($parts['host'])) {
+            return null;
+        }
+        $scheme = strtolower($parts['scheme']);
+        if (!in_array($scheme, ['http', 'https'], true)) {
+            return null;
+        }
+        $ip = @gethostbyname($parts['host']);
+        if ($ip && filter_var($ip, FILTER_VALIDATE_IP)) {
+            if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
+                return null; // جلوگیری از SSRF به شبکه داخلی سرور
+            }
+        }
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER  => true,
+            CURLOPT_FOLLOWLOCATION  => true,
+            CURLOPT_MAXREDIRS       => 3,
+            CURLOPT_CONNECTTIMEOUT  => 8,
+            CURLOPT_TIMEOUT         => 25,
+            CURLOPT_PROTOCOLS       => CURLPROTO_HTTP | CURLPROTO_HTTPS,
+            CURLOPT_REDIR_PROTOCOLS => CURLPROTO_HTTP | CURLPROTO_HTTPS,
+            CURLOPT_SSL_VERIFYPEER  => false,
+            CURLOPT_SSL_VERIFYHOST  => 0,
+            CURLOPT_USERAGENT       => 'Mozilla/5.0 (SmartVideoCourseEngine/4.4)'
+        ]);
+        $data = curl_exec($ch);
+        $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if ($code !== 200 || empty($data) || strlen($data) > $max_bytes) {
+            return null;
+        }
+        return $data;
+    }
+}
+
+if (!function_exists('validate_uploaded_file_security')) {
+    function validate_uploaded_file_security(array $file_arr, array $allowed_exts, int $max_mb = 64): void {
+        if (!isset($file_arr['error']) || $file_arr['error'] !== UPLOAD_ERR_OK) {
+            throw new Exception('خطا در دریافت فایل آپلودشده.');
+        }
+        $max_bytes = $max_mb * 1024 * 1024;
+        if ($file_arr['size'] <= 0 || $file_arr['size'] > $max_bytes) {
+            throw new Exception("حجم فایل بیش از حد مجاز ({$max_mb} مگابایت) است.");
+        }
+        $ext = strtolower(pathinfo($file_arr['name'], PATHINFO_EXTENSION));
+        if (!in_array($ext, $allowed_exts, true)) {
+            throw new Exception('فرمت فایل مجاز نیست. فرمت‌های مجاز: ' . implode(', ', $allowed_exts));
+        }
+        $head_bytes = @file_get_contents($file_arr['tmp_name'], false, null, 0, 512);
+        if ($head_bytes !== false && preg_match('/<\?(?:php|=)/i', $head_bytes)) {
+            throw new Exception('محتوای فایل آپلودشده غیرامن تشخیص داده شد.');
+        }
+        if (function_exists('finfo_open')) {
+            $finfo = finfo_open(FILEINFO_MIME_TYPE);
+            $mime  = strtolower((string)finfo_file($finfo, $file_arr['tmp_name']));
+            finfo_close($finfo);
+
+            $mime_allow_map = [
+                'pdf'  => ['application/pdf', 'application/x-pdf', 'application/octet-stream'],
+                'jpg'  => ['image/jpeg', 'image/pjpeg'],
+                'jpeg' => ['image/jpeg', 'image/pjpeg'],
+                'png'  => ['image/png'],
+                'webp' => ['image/webp'],
+                'zip'  => ['application/zip', 'application/x-zip-compressed', 'multipart/x-zip', 'application/octet-stream'],
+                'rar'  => ['application/x-rar', 'application/x-rar-compressed', 'application/vnd.rar', 'application/octet-stream'],
+                'srt'  => ['text/plain', 'application/x-subrip', 'text/srt', 'application/octet-stream'],
+                'vtt'  => ['text/vtt', 'text/plain', 'application/octet-stream'],
+                'txt'  => ['text/plain'],
+                'doc'  => ['application/msword', 'application/octet-stream'],
+                'docx' => ['application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/zip', 'application/octet-stream'],
+            ];
+            if (isset($mime_allow_map[$ext]) && !in_array($mime, $mime_allow_map[$ext], true)) {
+                throw new Exception("ساختار واقعی فایل ({$mime}) با پسوند .{$ext} همخوانی ندارد.");
+            }
+        }
+    }
+}
+
+// ====================================================
 // ۱. ساخت خودکار پوشه آپلود دوره‌ها و ۵ جدول دیتابیس
 // ====================================================
-$courses_upload_dir = dirname(__DIR__) . '/uploads/courses/';
+$courses_upload_dir = $root_path . '/uploads/courses/';
 $subtitles_dir      = $courses_upload_dir . 'subtitles/';
 $booklets_dir       = $courses_upload_dir . 'booklets/';
 $covers_dir         = $courses_upload_dir . 'covers/';
@@ -43,151 +166,131 @@ foreach ([$courses_upload_dir, $subtitles_dir, $booklets_dir, $covers_dir] as $d
     }
 }
 
-try {
-    $pdo->exec("
-        CREATE TABLE IF NOT EXISTS `courses` (
-          `id` int(11) NOT NULL AUTO_INCREMENT,
-          `title` varchar(255) NOT NULL,
-          `instructor` varchar(120) DEFAULT NULL,
-          `category` varchar(100) DEFAULT 'عمومی',
-          `description` text DEFAULT NULL,
-          `cover_image` varchar(255) DEFAULT NULL,
-          `is_vip_only` tinyint(1) NOT NULL DEFAULT 1 COMMENT '1=ویژه مشترکین VIP, 0=رایگان برای همه',
-          `is_active` tinyint(1) NOT NULL DEFAULT 1 COMMENT '1=منتشرشده, 0=پیش‌نویس',
-          `sort_order` int(11) NOT NULL DEFAULT 1,
-          `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-          PRIMARY KEY (`id`)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_persian_ci;
-    ");
+if (empty($_SESSION['courses_tables_v44_checked'])) {
+    try {
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS `courses` (
+              `id` int(11) NOT NULL AUTO_INCREMENT,
+              `title` varchar(255) NOT NULL,
+              `instructor` varchar(120) DEFAULT NULL,
+              `category` varchar(100) DEFAULT 'عمومی',
+              `description` text DEFAULT NULL,
+              `cover_image` varchar(255) DEFAULT NULL,
+              `is_vip_only` tinyint(1) NOT NULL DEFAULT 1 COMMENT '1=ویژه مشترکین VIP, 0=رایگان برای همه',
+              `is_active` tinyint(1) NOT NULL DEFAULT 1 COMMENT '1=منتشرشده, 0=پیش‌نویس',
+              `sort_order` int(11) NOT NULL DEFAULT 1,
+              `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY (`id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_persian_ci;
+        ");
 
-    $pdo->exec("
-        CREATE TABLE IF NOT EXISTS `course_chapters` (
-          `id` int(11) NOT NULL AUTO_INCREMENT,
-          `course_id` int(11) NOT NULL,
-          `title` varchar(255) NOT NULL,
-          `sort_order` int(11) NOT NULL DEFAULT 1,
-          `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-          PRIMARY KEY (`id`),
-          KEY `idx_chap_course` (`course_id`, `sort_order`),
-          CONSTRAINT `fk_chap_course` FOREIGN KEY (`course_id`) REFERENCES `courses` (`id`) ON DELETE CASCADE
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_persian_ci;
-    ");
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS `course_chapters` (
+              `id` int(11) NOT NULL AUTO_INCREMENT,
+              `course_id` int(11) NOT NULL,
+              `title` varchar(255) NOT NULL,
+              `sort_order` int(11) NOT NULL DEFAULT 1,
+              `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY (`id`),
+              KEY `idx_chap_course` (`course_id`, `sort_order`),
+              CONSTRAINT `fk_chap_course` FOREIGN KEY (`course_id`) REFERENCES `courses` (`id`) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_persian_ci;
+        ");
 
-    $pdo->exec("
-        CREATE TABLE IF NOT EXISTS `course_lessons` (
-          `id` int(11) NOT NULL AUTO_INCREMENT,
-          `course_id` int(11) NOT NULL,
-          `chapter_id` int(11) NOT NULL,
-          `title` varchar(255) NOT NULL,
-          `description` text DEFAULT NULL,
-          `video_url` text NOT NULL COMMENT 'لینک مستقیم ویدیو یا لینک/کد امبد آپارات',
-          `video_url_backup` text DEFAULT NULL COMMENT 'لینک کیفیت دوم یا کمکی',
-          `duration_sec` int(11) NOT NULL DEFAULT 0,
-          `subtitle_url` text DEFAULT NULL COMMENT 'فایل یا لینک زیرنویس SRT/VTT',
-          `booklet_url` text DEFAULT NULL COMMENT 'فایل یا لینک جزوه اختصاصی جلسه',
-          `booklet_title` varchar(150) DEFAULT 'جزوه و نکات جلسه',
-          `linked_exam_id` int(11) DEFAULT NULL COMMENT 'اتصال به آزمون مرتبط در exam.php',
-          `is_free_preview` tinyint(1) NOT NULL DEFAULT 0 COMMENT '1=پیش‌نمایش رایگان برای همه, 0=تابع وضعیت دوره',
-          `sort_order` int(11) NOT NULL DEFAULT 1,
-          `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-          PRIMARY KEY (`id`),
-          KEY `idx_less_course_chap` (`course_id`, `chapter_id`, `sort_order`),
-          CONSTRAINT `fk_less_course` FOREIGN KEY (`course_id`) REFERENCES `courses` (`id`) ON DELETE CASCADE,
-          CONSTRAINT `fk_less_chap` FOREIGN KEY (`chapter_id`) REFERENCES `course_chapters` (`id`) ON DELETE CASCADE
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_persian_ci;
-    ");
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS `course_lessons` (
+              `id` int(11) NOT NULL AUTO_INCREMENT,
+              `course_id` int(11) NOT NULL,
+              `chapter_id` int(11) NOT NULL,
+              `title` varchar(255) NOT NULL,
+              `description` text DEFAULT NULL,
+              `video_url` text NOT NULL COMMENT 'لینک مستقیم ویدیو یا لینک/کد امبد آپارات',
+              `video_url_backup` text DEFAULT NULL COMMENT 'لینک کیفیت دوم یا کمکی',
+              `duration_sec` int(11) NOT NULL DEFAULT 0,
+              `subtitle_url` text DEFAULT NULL COMMENT 'فایل یا لینک زیرنویس SRT/VTT',
+              `booklet_url` text DEFAULT NULL COMMENT 'فایل یا لینک جزوه اختصاصی جلسه',
+              `booklet_title` varchar(150) DEFAULT 'جزوه و نکات جلسه',
+              `linked_exam_id` int(11) DEFAULT NULL COMMENT 'اتصال به آزمون مرتبط در exam.php',
+              `is_free_preview` tinyint(1) NOT NULL DEFAULT 0 COMMENT '1=پیش‌نمایش رایگان برای همه, 0=تابع وضعیت دوره',
+              `sort_order` int(11) NOT NULL DEFAULT 1,
+              `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY (`id`),
+              KEY `idx_less_course_chap` (`course_id`, `chapter_id`, `sort_order`),
+              CONSTRAINT `fk_less_course` FOREIGN KEY (`course_id`) REFERENCES `courses` (`id`) ON DELETE CASCADE,
+              CONSTRAINT `fk_less_chap` FOREIGN KEY (`chapter_id`) REFERENCES `course_chapters` (`id`) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_persian_ci;
+        ");
 
-    $pdo->exec("
-        CREATE TABLE IF NOT EXISTS `video_progress` (
-          `id` int(11) NOT NULL AUTO_INCREMENT,
-          `user_id` int(11) NOT NULL,
-          `course_id` int(11) NOT NULL,
-          `lesson_id` int(11) NOT NULL,
-          `current_time_sec` int(11) NOT NULL DEFAULT 0,
-          `duration_sec` int(11) NOT NULL DEFAULT 0,
-          `max_watched_sec` int(11) NOT NULL DEFAULT 0,
-          `is_completed` tinyint(1) NOT NULL DEFAULT 0,
-          `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-          PRIMARY KEY (`id`),
-          UNIQUE KEY `uk_user_lesson_prog` (`user_id`, `lesson_id`),
-          KEY `idx_user_course_prog` (`user_id`, `course_id`),
-          CONSTRAINT `fk_vprog_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
-          CONSTRAINT `fk_vprog_lesson` FOREIGN KEY (`lesson_id`) REFERENCES `course_lessons` (`id`) ON DELETE CASCADE
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_persian_ci;
-    ");
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS `video_progress` (
+              `id` int(11) NOT NULL AUTO_INCREMENT,
+              `user_id` int(11) NOT NULL,
+              `course_id` int(11) NOT NULL,
+              `lesson_id` int(11) NOT NULL,
+              `current_time_sec` int(11) NOT NULL DEFAULT 0,
+              `duration_sec` int(11) NOT NULL DEFAULT 0,
+              `max_watched_sec` int(11) NOT NULL DEFAULT 0,
+              `is_completed` tinyint(1) NOT NULL DEFAULT 0,
+              `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+              PRIMARY KEY (`id`),
+              UNIQUE KEY `uk_user_lesson_prog` (`user_id`, `lesson_id`),
+              KEY `idx_user_course_prog` (`user_id`, `course_id`),
+              CONSTRAINT `fk_vprog_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+              CONSTRAINT `fk_vprog_lesson` FOREIGN KEY (`lesson_id`) REFERENCES `course_lessons` (`id`) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_persian_ci;
+        ");
 
-    $pdo->exec("
-        CREATE TABLE IF NOT EXISTS `video_notes` (
-          `id` int(11) NOT NULL AUTO_INCREMENT,
-          `user_id` int(11) NOT NULL,
-          `course_id` int(11) NOT NULL,
-          `lesson_id` int(11) NOT NULL,
-          `timestamp_sec` int(11) NOT NULL DEFAULT 0,
-          `note_text` text NOT NULL,
-          `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
-          PRIMARY KEY (`id`),
-          KEY `idx_vnote_user_lesson` (`user_id`, `lesson_id`, `timestamp_sec`),
-          CONSTRAINT `fk_vnote_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
-          CONSTRAINT `fk_vnote_lesson` FOREIGN KEY (`lesson_id`) REFERENCES `course_lessons` (`id`) ON DELETE CASCADE
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_persian_ci;
-    ");
-} catch (Exception $ignore) {}
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS `video_notes` (
+              `id` int(11) NOT NULL AUTO_INCREMENT,
+              `user_id` int(11) NOT NULL,
+              `course_id` int(11) NOT NULL,
+              `lesson_id` int(11) NOT NULL,
+              `timestamp_sec` int(11) NOT NULL DEFAULT 0,
+              `note_text` text NOT NULL,
+              `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY (`id`),
+              KEY `idx_vnote_user_lesson` (`user_id`, `lesson_id`, `timestamp_sec`),
+              CONSTRAINT `fk_vnote_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+              CONSTRAINT `fk_vnote_lesson` FOREIGN KEY (`lesson_id`) REFERENCES `course_lessons` (`id`) ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_persian_ci;
+        ");
 
-// ====================================================
-// ۲. توابع کمکی تاریخ شمسی و موتور پردازش لینک و API آپارات
-// ====================================================
-function course_gdate_to_jalali($g_date) {
-    $parts = explode('-', trim($g_date));
-    if (count($parts) !== 3) return $g_date;
-    $gy = (int)$parts[0];
-    $gm = (int)$parts[1];
-    $gd = (int)$parts[2];
-
-    if (function_exists('format_jalali')) {
-        return format_jalali($gy, $gm, $gd);
-    }
-
-    $g_d_m = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334];
-    $gy2 = ($gm > 2) ? ($gy + 1) : $gy;
-    $days = 355666 + (365 * $gy) + intdiv($gy2 + 3, 4) - intdiv($gy2 + 99, 100) + intdiv($gy2 + 399, 400) + $gd + $g_d_m[$gm - 1];
-    $jy = -1595 + (33 * intdiv($days, 12053));
-    $days %= 12053;
-    $jy += 4 * intdiv($days, 1461);
-    $days %= 1461;
-    if ($days > 365) {
-        $jy += intdiv($days - 1, 365);
-        $days = ($days - 1) % 365;
-    }
-    $jm = ($days < 186) ? 1 + intdiv($days, 31) : 7 + intdiv($days - 186, 30);
-    $jd = ($days < 186) ? 1 + ($days % 31) : 1 + (($days - 186) % 30);
-
-    return sprintf('%04d-%02d-%02d', $jy, $jm, $jd);
+        $_SESSION['courses_tables_v44_checked'] = true;
+    } catch (Exception $ignore) {}
 }
 
-// استخراج کد یکتای ویدیوی آپارات (videohash) از لینک صفحه، لینک امبد یا کد کامل iframe
+// ====================================================
+// ۲. توابع کمکی تاریخ شمسی، آپلود امن و موتور پردازش لینک آپارات
+// ====================================================
+function course_gdate_to_jalali($g_date) {
+    if (function_exists('gdate_to_jalali_str')) {
+        return gdate_to_jalali_str($g_date);
+    }
+    $parts = explode('-', trim((string)$g_date));
+    if (count($parts) !== 3) return $g_date;
+    if (function_exists('format_jalali')) {
+        return format_jalali((int)$parts[0], (int)$parts[1], (int)$parts[2]);
+    }
+    return $g_date;
+}
+
 function extract_aparat_video_hash($raw_input) {
     $str = trim((string)$raw_input);
     if ($str === '') return null;
 
-    // اگر لینک مستقیم فایل .mp4 از CDN آپارات باشد، به عنوان فایل ویدیویی مستقیم پخش شود
     if (preg_match('/\.mp4(\?.*)?$/i', $str) && stripos($str, '<iframe') === false) {
         return null;
     }
-
-    // ۱. تشخیص از لینک یا کد امبد آپارات: aparat.com/video/video/embed/videohash/XXXXX/vt/frame
     if (preg_match('#aparat\.com/video/video/embed/videohash/([a-zA-Z0-9]+)#i', $str, $m)) {
         return $m[1];
     }
-
-    // ۲. تشخیص از لینک صفحه عادی آپارات: aparat.com/v/XXXXX
     if (preg_match('#aparat\.com/v/([a-zA-Z0-9]+)#i', $str, $m)) {
         return $m[1];
     }
-
     return null;
 }
 
-// استانداردسازی ورودی ادمین (تبدیل کد <iframe> آپارات به لینک تمیز و استاندارد)
 function normalize_admin_video_url_input($raw_input) {
     $str = trim((string)$raw_input);
     $hash = extract_aparat_video_hash($str);
@@ -200,7 +303,6 @@ function normalize_admin_video_url_input($raw_input) {
     return $str;
 }
 
-// دریافت عنوان، زمان، پوستر و لینک‌های مستقیم .mp4 از API رسمی آپارات
 function fetch_aparat_video_streams($video_hash) {
     $embed_url = "https://www.aparat.com/video/video/embed/videohash/" . urlencode($video_hash) . "/vt/frame";
     $api_url   = "https://www.aparat.com/etc/api/video/videohash/" . urlencode($video_hash);
@@ -217,22 +319,9 @@ function fetch_aparat_video_streams($video_hash) {
     ];
 
     try {
-        $ch = curl_init($api_url);
-        curl_setopt_array($ch, [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_FOLLOWLOCATION => true,
-            CURLOPT_CONNECTTIMEOUT => 5,
-            CURLOPT_TIMEOUT        => 8,
-            CURLOPT_SSL_VERIFYPEER => false,
-            CURLOPT_SSL_VERIFYHOST => 0,
-            CURLOPT_USERAGENT      => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        ]);
-        $raw = curl_exec($ch);
-        $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
-
-        if ($code === 200 && !empty($raw)) {
-            $json = json_decode($raw, true);
+        $raw = safe_remote_curl_get($api_url, 1048576);
+        if (!empty($raw)) {
+            $json  = json_decode($raw, true);
             $vinfo = $json['video'] ?? null;
             if (is_array($vinfo)) {
                 $result['title']  = trim($vinfo['title'] ?? '');
@@ -252,8 +341,7 @@ function fetch_aparat_video_streams($video_hash) {
                     }
                 }
 
-                $preferred_main = ['720p', '1080p', '480p', '360p', '240p'];
-                foreach ($preferred_main as $p) {
+                foreach (['720p', '1080p', '480p', '360p', '240p'] as $p) {
                     if (!empty($links[$p])) {
                         $result['direct_mp4_main'] = $links[$p];
                         break;
@@ -266,8 +354,7 @@ function fetch_aparat_video_streams($video_hash) {
                     $result['direct_mp4_main'] = $vinfo['file_link'];
                 }
 
-                $preferred_bkp = ['480p', '360p', '720p'];
-                foreach ($preferred_bkp as $p) {
+                foreach (['480p', '360p', '720p'] as $p) {
                     if (!empty($links[$p]) && $links[$p] !== $result['direct_mp4_main']) {
                         $result['direct_mp4_bkp'] = $links[$p];
                         break;
@@ -285,12 +372,14 @@ function handle_course_file_upload($file_key, array $allowed_exts, $dest_dir, $r
         return null;
     }
     $f = $_FILES[$file_key];
-    $ext = strtolower(pathinfo($f['name'], PATHINFO_EXTENSION));
-    if (!in_array($ext, $allowed_exts, true)) {
-        throw new Exception('فرمت فایل آپلودشده مجاز نیست. فرمت‌های مجاز: ' . implode(', ', $allowed_exts));
-    }
-    $new_name = 'cfile_' . time() . '_' . bin2hex(random_bytes(4)) . '.' . $ext;
+
+    // بررسی امنیتی پسوند، حجم و امضای باینری فایل (Magic Bytes)
+    validate_uploaded_file_security($f, $allowed_exts, 64);
+
+    $ext       = strtolower(pathinfo($f['name'], PATHINFO_EXTENSION));
+    $new_name  = 'cfile_' . time() . '_' . bin2hex(random_bytes(4)) . '.' . $ext;
     $full_dest = rtrim($dest_dir, '/') . '/' . $new_name;
+
     if (!move_uploaded_file($f['tmp_name'], $full_dest)) {
         throw new Exception('خطا در ذخیره فایل در پوشه uploads/courses هاست.');
     }
@@ -312,7 +401,7 @@ function can_user_access_lesson(array $course, array $lesson, array $sub_info, b
 
 try {
     // ====================================================
-    // الف) اکشن‌های عمومی دانشجویان (courses.php)
+    // الف) اکشن‌های عمومی دانشجویان (وب و فلاتر)
     // ====================================================
 
     // ۱. دریافت لیست تمام دوره‌های فعال به همراه درصد پیشرفت کاربر و آخرین جلسه دیده‌شده
@@ -338,9 +427,9 @@ try {
         $progStmt->execute([$user_id]);
         $user_progs = $progStmt->fetchAll();
 
-        $completed_by_course = [];
+        $completed_by_course    = [];
         $last_watched_by_course = [];
-        $global_last_watched = null;
+        $global_last_watched    = null;
 
         foreach ($user_progs as $pr) {
             $cid = (int)$pr['course_id'];
@@ -368,7 +457,7 @@ try {
         }
 
         foreach ($courses as &$c) {
-            $cid = (int)$c['id'];
+            $cid     = (int)$c['id'];
             $total_l = max(0, (int)$c['lessons_count']);
             $done_l  = $completed_by_course[$cid] ?? 0;
 
@@ -386,19 +475,19 @@ try {
             'courses'             => $courses,
             'global_last_watched' => $global_last_watched,
             'subscription'        => $sub_info
-        ]);
+        ], JSON_UNESCAPED_UNICODE);
         exit;
     }
 
     // ۲. دریافت ساختار کامل یک دوره (فصل‌ها، جلسات و ثانیه پخش ذخیره‌شده هر جلسه)
     if ($action === 'get_course_details') {
-        $course_id = (int)($_GET['course_id'] ?? 0);
+        $course_id = (int)($_GET['course_id'] ?? ($_POST['course_id'] ?? 0));
         $stmt = $pdo->prepare("SELECT * FROM courses WHERE id = ? AND (is_active = 1 OR ? = 1)");
         $stmt->execute([$course_id, $is_admin ? 1 : 0]);
         $course = $stmt->fetch();
 
         if (!$course) {
-            echo json_encode(['status' => 'error', 'message' => 'دوره آموزشی مورد نظر یافت نشد.']);
+            echo json_encode(['status' => 'error', 'message' => 'دوره آموزشی مورد نظر یافت نشد.'], JSON_UNESCAPED_UNICODE);
             exit;
         }
 
@@ -438,9 +527,9 @@ try {
             }
         }
 
-        $lessons_by_chapter = [];
-        $total_lessons_count = 0;
-        $completed_lessons_count = 0;
+        $lessons_by_chapter       = [];
+        $total_lessons_count      = 0;
+        $completed_lessons_count  = 0;
         $first_unlocked_lesson_id = null;
 
         foreach ($lessons as $ls) {
@@ -495,13 +584,13 @@ try {
             'progress_percent'  => $total_lessons_count > 0 ? min(100, round(($completed_lessons_count / $total_lessons_count) * 100)) : 0,
             'resume_lesson_id'  => $last_watched_lesson_id ?: $first_unlocked_lesson_id,
             'subscription'      => $sub_info
-        ]);
+        ], JSON_UNESCAPED_UNICODE);
         exit;
     }
 
     // ۳. دریافت اطلاعات کامل یک جلسه تکی + استخراج هوشمند لینک‌های آپارات + یادداشت‌های زمان‌دار
     if ($action === 'get_lesson_data') {
-        $lesson_id = (int)($_GET['lesson_id'] ?? 0);
+        $lesson_id = (int)($_GET['lesson_id'] ?? ($_POST['lesson_id'] ?? 0));
         $stmt = $pdo->prepare("
             SELECT l.*, c.title AS course_title, c.is_vip_only AS course_vip_only,
                    ch.title AS chapter_title, e.title AS linked_exam_title
@@ -515,7 +604,7 @@ try {
         $lesson = $stmt->fetch();
 
         if (!$lesson) {
-            echo json_encode(['status' => 'error', 'message' => 'جلسه مورد نظر یافت نشد.']);
+            echo json_encode(['status' => 'error', 'message' => 'جلسه مورد نظر یافت نشد.'], JSON_UNESCAPED_UNICODE);
             exit;
         }
 
@@ -525,7 +614,7 @@ try {
                 'status'   => 'error',
                 'need_vip' => true,
                 'message'  => 'تماشای این جلسه و دریافت جزوه آن مخصوص مشترکین ویژه (VIP) است. لطفاً اشتراک ویژه تهیه نمایید.'
-            ]);
+            ], JSON_UNESCAPED_UNICODE);
             exit;
         }
 
@@ -573,13 +662,13 @@ try {
                 'is_completed'     => $prog ? ((int)$prog['is_completed'] === 1) : false
             ],
             'notes'    => $notes
-        ]);
+        ], JSON_UNESCAPED_UNICODE);
         exit;
     }
 
-    // ۴. خواندن محتوای خام زیرنویس (.srt یا .vtt) بدون مشکل CORS
+    // ۴. خواندن محتوای خام زیرنویس (.srt یا .vtt) با محافظت کامل در برابر SSRF و Path Traversal
     if ($action === 'get_subtitle_raw') {
-        $lesson_id = (int)($_GET['lesson_id'] ?? 0);
+        $lesson_id = (int)($_GET['lesson_id'] ?? ($_POST['lesson_id'] ?? 0));
         $stmt = $pdo->prepare("
             SELECT l.*, c.is_vip_only AS course_vip_only
             FROM course_lessons l
@@ -590,40 +679,29 @@ try {
         $lesson = $stmt->fetch();
 
         if (!$lesson || empty($lesson['subtitle_url'])) {
-            echo json_encode(['status' => 'error', 'message' => 'زیرنویسی برای این جلسه ثبت نشده است.']);
+            echo json_encode(['status' => 'error', 'message' => 'زیرنویسی برای این جلسه ثبت نشده است.'], JSON_UNESCAPED_UNICODE);
             exit;
         }
 
         if (!can_user_access_lesson(['is_vip_only' => $lesson['course_vip_only']], $lesson, $sub_info, $is_admin)) {
-            echo json_encode(['status' => 'error', 'need_vip' => true, 'message' => 'نیازمند اشتراک ویژه']);
+            echo json_encode(['status' => 'error', 'need_vip' => true, 'message' => 'نیازمند اشتراک ویژه'], JSON_UNESCAPED_UNICODE);
             exit;
         }
 
-        $sub_url = trim($lesson['subtitle_url']);
+        $sub_url     = trim($lesson['subtitle_url']);
         $raw_content = '';
 
         if (preg_match('#^https?://#i', $sub_url)) {
-            $ch = curl_init($sub_url);
-            curl_setopt_array($ch, [
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_FOLLOWLOCATION => true,
-                CURLOPT_CONNECTTIMEOUT => 8,
-                CURLOPT_TIMEOUT        => 20,
-                CURLOPT_SSL_VERIFYPEER => false,
-                CURLOPT_SSL_VERIFYHOST => 0,
-                CURLOPT_USERAGENT      => 'Mozilla/5.0 (SmartVideoSubtitleLoader/4.4)'
-            ]);
-            $raw_content = curl_exec($ch);
-            curl_close($ch);
+            $raw_content = safe_remote_curl_get($sub_url, 2097152) ?? '';
         } else {
-            $local_file = dirname(__DIR__) . '/' . ltrim($sub_url, '/');
-            if (is_file($local_file)) {
-                $raw_content = file_get_contents($local_file);
+            $safe_local = resolve_safe_upload_path($sub_url);
+            if ($safe_local !== null) {
+                $raw_content = (string)file_get_contents($safe_local);
             }
         }
 
         if (empty($raw_content)) {
-            echo json_encode(['status' => 'error', 'message' => 'فایل زیرنویس قابل خواندن نبود.']);
+            echo json_encode(['status' => 'error', 'message' => 'فایل زیرنویس قابل خواندن نبود.'], JSON_UNESCAPED_UNICODE);
             exit;
         }
 
@@ -632,22 +710,39 @@ try {
         echo json_encode([
             'status'  => 'success',
             'content' => $raw_content
-        ]);
+        ], JSON_UNESCAPED_UNICODE);
         exit;
     }
 
-    // ۵. ذخیره خودکار ثانیه فعلی پخش ویدیو (Auto-Resume) و تشخیص تکمیل جلسه
+    // ۵. ذخیره خودکار ثانیه فعلی پخش ویدیو (Auto-Resume) با بررسی تعلق جلسه به دوره (ضد IDOR)
     if ($action === 'save_progress') {
         $lesson_id        = (int)($_POST['lesson_id'] ?? 0);
-        $course_id        = (int)($_POST['course_id'] ?? 0);
         $current_time_sec = max(0, (int)($_POST['current_time_sec'] ?? 0));
         $duration_sec     = max(0, (int)($_POST['duration_sec'] ?? 0));
         $force_completed  = isset($_POST['is_completed']) ? (int)$_POST['is_completed'] : null;
 
-        if ($lesson_id <= 0 || $course_id <= 0) {
-            echo json_encode(['status' => 'error', 'message' => 'شناسه جلسه نامعتبر است.']);
+        if ($lesson_id <= 0) {
+            echo json_encode(['status' => 'error', 'message' => 'شناسه جلسه نامعتبر است.'], JSON_UNESCAPED_UNICODE);
             exit;
         }
+
+        $lStmt = $pdo->prepare("
+            SELECT l.id, l.course_id, l.is_free_preview, c.is_vip_only
+            FROM course_lessons l
+            INNER JOIN courses c ON c.id = l.course_id
+            WHERE l.id = ?
+            LIMIT 1
+        ");
+        $lStmt->execute([$lesson_id]);
+        $lRow = $lStmt->fetch();
+
+        if (!$lRow || !can_user_access_lesson(['is_vip_only' => $lRow['is_vip_only']], $lRow, $sub_info, $is_admin)) {
+            http_response_code(403);
+            echo json_encode(['status' => 'error', 'message' => 'عدم دسترسی به این جلسه.'], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+
+        $verified_course_id = (int)$lRow['course_id'];
 
         $auto_done = ($duration_sec > 30 && $current_time_sec >= ($duration_sec * 0.90)) ? 1 : 0;
         if ($force_completed !== null) {
@@ -665,7 +760,7 @@ try {
                 is_completed     = GREATEST(is_completed, VALUES(is_completed))
         ";
         $stmt = $pdo->prepare($sql);
-        $stmt->execute([$user_id, $course_id, $lesson_id, $current_time_sec, $duration_sec, $current_time_sec, $auto_done]);
+        $stmt->execute([$user_id, $verified_course_id, $lesson_id, $current_time_sec, $duration_sec, $current_time_sec, $auto_done]);
 
         if ($duration_sec > 0) {
             $pdo->prepare("UPDATE course_lessons SET duration_sec = ? WHERE id = ? AND duration_sec = 0")
@@ -676,14 +771,22 @@ try {
             'status'           => 'success',
             'current_time_sec' => $current_time_sec,
             'is_completed'     => (bool)$auto_done
-        ]);
+        ], JSON_UNESCAPED_UNICODE);
         exit;
     }
 
     // ۶. تغییر دستی وضعیت تکمیل یک جلسه توسط دانشجو
     if ($action === 'toggle_lesson_complete') {
         $lesson_id = (int)($_POST['lesson_id'] ?? 0);
-        $course_id = (int)($_POST['course_id'] ?? 0);
+
+        $lStmt = $pdo->prepare("SELECT course_id FROM course_lessons WHERE id = ? LIMIT 1");
+        $lStmt->execute([$lesson_id]);
+        $verified_course_id = (int)$lStmt->fetchColumn();
+
+        if ($verified_course_id <= 0) {
+            echo json_encode(['status' => 'error', 'message' => 'جلسه یافت نشد.'], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
 
         $stmt = $pdo->prepare("SELECT is_completed FROM video_progress WHERE user_id = ? AND lesson_id = ? LIMIT 1");
         $stmt->execute([$user_id, $lesson_id]);
@@ -696,24 +799,32 @@ try {
             VALUES (?, ?, ?, 0, 0, 0, ?)
             ON DUPLICATE KEY UPDATE is_completed = VALUES(is_completed)
         ");
-        $ins->execute([$user_id, $course_id, $lesson_id, $new_val]);
+        $ins->execute([$user_id, $verified_course_id, $lesson_id, $new_val]);
 
         echo json_encode([
             'status'       => 'success',
             'is_completed' => (bool)$new_val
-        ]);
+        ], JSON_UNESCAPED_UNICODE);
         exit;
     }
 
     // ۷. مدیریت یادداشت‌های زمان‌دار دانشجو روی ویدیو
     if ($action === 'save_note') {
         $lesson_id     = (int)($_POST['lesson_id'] ?? 0);
-        $course_id     = (int)($_POST['course_id'] ?? 0);
         $timestamp_sec = max(0, (int)($_POST['timestamp_sec'] ?? 0));
         $note_text     = trim($_POST['note_text'] ?? '');
 
         if ($lesson_id <= 0 || empty($note_text)) {
-            echo json_encode(['status' => 'error', 'message' => 'متن یادداشت نمی‌تواند خالی باشد.']);
+            echo json_encode(['status' => 'error', 'message' => 'متن یادداشت نمی‌تواند خالی باشد.'], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+
+        $lStmt = $pdo->prepare("SELECT course_id FROM course_lessons WHERE id = ? LIMIT 1");
+        $lStmt->execute([$lesson_id]);
+        $verified_course_id = (int)$lStmt->fetchColumn();
+
+        if ($verified_course_id <= 0) {
+            echo json_encode(['status' => 'error', 'message' => 'جلسه معتبر نیست.'], JSON_UNESCAPED_UNICODE);
             exit;
         }
 
@@ -721,24 +832,24 @@ try {
             INSERT INTO video_notes (user_id, course_id, lesson_id, timestamp_sec, note_text)
             VALUES (?, ?, ?, ?, ?)
         ");
-        $ins->execute([$user_id, $course_id, $lesson_id, $timestamp_sec, $note_text]);
+        $ins->execute([$user_id, $verified_course_id, $lesson_id, $timestamp_sec, $note_text]);
 
         echo json_encode([
             'status'  => 'success',
             'note_id' => (int)$pdo->lastInsertId(),
             'message' => 'یادداشت در ثانیه مشخص‌شده ثبت شد.'
-        ]);
+        ], JSON_UNESCAPED_UNICODE);
         exit;
     }
 
     if ($action === 'delete_note') {
         $note_id = (int)($_POST['note_id'] ?? 0);
         $pdo->prepare("DELETE FROM video_notes WHERE id = ? AND user_id = ?")->execute([$note_id, $user_id]);
-        echo json_encode(['status' => 'success']);
+        echo json_encode(['status' => 'success'], JSON_UNESCAPED_UNICODE);
         exit;
     }
 
-    // ۸. افزودن یک‌کلیکی جزوه PDF این جلسه به بخش «📚 جزوه‌خوان»
+    // ۸. افزودن یک‌کلیکی جزوه PDF این جلسه به بخش «📚 جزوه‌خوان» (ایمن در برابر SSRF و Path Traversal)
     if ($action === 'import_booklet_to_reader') {
         $lesson_id = (int)($_POST['lesson_id'] ?? 0);
         $stmt = $pdo->prepare("
@@ -751,12 +862,12 @@ try {
         $lesson = $stmt->fetch();
 
         if (!$lesson || empty($lesson['booklet_url'])) {
-            echo json_encode(['status' => 'error', 'message' => 'جزوه‌ای برای این جلسه ثبت نشده است.']);
+            echo json_encode(['status' => 'error', 'message' => 'جزوه‌ای برای این جلسه ثبت نشده است.'], JSON_UNESCAPED_UNICODE);
             exit;
         }
 
         if (!can_user_access_lesson(['is_vip_only' => $lesson['course_vip_only']], $lesson, $sub_info, $is_admin)) {
-            echo json_encode(['status' => 'error', 'need_vip' => true, 'message' => 'نیازمند اشتراک ویژه']);
+            echo json_encode(['status' => 'error', 'need_vip' => true, 'message' => 'نیازمند اشتراک ویژه'], JSON_UNESCAPED_UNICODE);
             exit;
         }
 
@@ -768,13 +879,13 @@ try {
                     'status'   => 'error',
                     'need_vip' => true,
                     'message'  => 'سهمیه ۱ فایل رایگان جزوه‌خوان شما پر شده است. برای انتقال جزوات جلسات به جزوه‌خوان و هایلایت روی آن‌ها، اشتراک ویژه تهیه کنید.'
-                ]);
+                ], JSON_UNESCAPED_UNICODE);
                 exit;
             }
         }
 
-        $b_url = trim($lesson['booklet_url']);
-        $pdfs_dir = dirname(__DIR__) . '/uploads/pdfs/';
+        $b_url    = trim($lesson['booklet_url']);
+        $pdfs_dir = $root_path . '/uploads/pdfs/';
         if (!is_dir($pdfs_dir)) @mkdir($pdfs_dir, 0755, true);
 
         $new_pdf_name = 'lesson_bkl_u' . $user_id . '_' . time() . '_' . bin2hex(random_bytes(3)) . '.pdf';
@@ -782,28 +893,20 @@ try {
         $rel_db_path  = 'uploads/pdfs/' . $new_pdf_name;
 
         if (preg_match('#^https?://#i', $b_url)) {
-            $ch = curl_init($b_url);
-            curl_setopt_array($ch, [
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_FOLLOWLOCATION => true,
-                CURLOPT_TIMEOUT        => 45,
-                CURLOPT_SSL_VERIFYPEER => false
-            ]);
-            $raw_pdf = curl_exec($ch);
-            curl_close($ch);
-            if (empty($raw_pdf) || strlen($raw_pdf) < 500) {
-                echo json_encode(['status' => 'error', 'message' => 'امکان دریافت مستقیم فایل PDF از لینک خارجی نبود؛ لطفاً از دکمه دانلود مستقیم استفاده کنید.']);
+            $raw_pdf = safe_remote_curl_get($b_url, 67108864);
+            if (empty($raw_pdf) || strlen($raw_pdf) < 500 || strncmp($raw_pdf, '%PDF-', 5) !== 0) {
+                echo json_encode(['status' => 'error', 'message' => 'فایل دریافتی یک سند PDF معتبر نیست؛ لطفاً از دکمه دانلود مستقیم استفاده کنید.'], JSON_UNESCAPED_UNICODE);
                 exit;
             }
             file_put_contents($dest_full, $raw_pdf);
         } else {
-            $src_local = dirname(__DIR__) . '/' . ltrim($b_url, '/');
-            if (!is_file($src_local) || strtolower(pathinfo($src_local, PATHINFO_EXTENSION)) !== 'pdf') {
-                echo json_encode(['status' => 'error', 'message' => 'فقط جزوات با فرمت PDF قابلیت انتقال به محیط جزوه‌خوان را دارند.']);
+            $src_local = resolve_safe_upload_path($b_url);
+            if ($src_local === null || strtolower(pathinfo($src_local, PATHINFO_EXTENSION)) !== 'pdf') {
+                echo json_encode(['status' => 'error', 'message' => 'فقط جزوات با فرمت PDF قابلیت انتقال به محیط جزوه‌خوان را دارند.'], JSON_UNESCAPED_UNICODE);
                 exit;
             }
             if (!copy($src_local, $dest_full)) {
-                echo json_encode(['status' => 'error', 'message' => 'خطا در کپی کردن جزوه به پوشه جزوه‌خوان.']);
+                echo json_encode(['status' => 'error', 'message' => 'خطا در کپی کردن جزوه به پوشه جزوه‌خوان.'], JSON_UNESCAPED_UNICODE);
                 exit;
             }
         }
@@ -819,7 +922,7 @@ try {
             'status'  => 'success',
             'pdf_id'  => (int)$pdo->lastInsertId(),
             'message' => 'جزوه این جلسه به بخش «📚 جزوه‌خوان» شما اضافه شد!'
-        ]);
+        ], JSON_UNESCAPED_UNICODE);
         exit;
     }
 
@@ -836,7 +939,7 @@ try {
         $lesson = $stmt->fetch();
 
         if (!$lesson) {
-            echo json_encode(['status' => 'error', 'message' => 'جلسه یافت نشد.']);
+            echo json_encode(['status' => 'error', 'message' => 'جلسه یافت نشد.'], JSON_UNESCAPED_UNICODE);
             exit;
         }
 
@@ -865,7 +968,7 @@ try {
         echo json_encode([
             'status'  => 'success',
             'message' => 'مدت زمان تماشای این جلسه به عنوان «✅ مطالعه انجام‌شده» در تقویم امروز شما ثبت شد!'
-        ]);
+        ], JSON_UNESCAPED_UNICODE);
         exit;
     }
 
@@ -874,31 +977,31 @@ try {
     // ====================================================
     if (!$is_admin) {
         http_response_code(403);
-        echo json_encode(['status' => 'error', 'message' => 'دسترسی محدود به مدیر کل سامانه است.']);
+        echo json_encode(['status' => 'error', 'message' => 'دسترسی محدود به مدیر کل سامانه است.'], JSON_UNESCAPED_UNICODE);
         exit;
     }
 
-    // ۱۰. استعلام آنی مشخصات ویدیو از آپارات برای فرم پنل ادمین (عنوان، مدت زمان و لینک‌های کیفیت)
+    // ۱۰. استعلام آنی مشخصات ویدیو از آپارات برای فرم پنل ادمین
     if ($action === 'fetch_aparat_meta') {
         $raw_input = $_POST['video_url'] ?? ($_GET['video_url'] ?? '');
-        $hash = extract_aparat_video_hash($raw_input);
+        $hash      = extract_aparat_video_hash($raw_input);
 
         if ($hash === null) {
-            echo json_encode(['status' => 'error', 'message' => 'لینک یا کد واردشده یک آدرس معتبر آپارات نیست.']);
+            echo json_encode(['status' => 'error', 'message' => 'لینک یا کد واردشده یک آدرس معتبر آپارات نیست.'], JSON_UNESCAPED_UNICODE);
             exit;
         }
 
         $ap_info = fetch_aparat_video_streams($hash);
         echo json_encode([
-            'status'        => 'success',
-            'aparat_hash'   => $hash,
-            'clean_url'     => "https://www.aparat.com/v/{$hash}",
-            'title'         => $ap_info['title'],
-            'duration_sec'  => $ap_info['duration_sec'],
-            'duration_mins' => $ap_info['duration_sec'] > 0 ? max(1, (int)round($ap_info['duration_sec'] / 60)) : 0,
-            'has_direct_mp4'=> !empty($ap_info['direct_mp4_main']),
-            'embed_url'     => $ap_info['aparat_embed_url']
-        ]);
+            'status'         => 'success',
+            'aparat_hash'    => $hash,
+            'clean_url'      => "https://www.aparat.com/v/{$hash}",
+            'title'          => $ap_info['title'],
+            'duration_sec'   => $ap_info['duration_sec'],
+            'duration_mins'  => $ap_info['duration_sec'] > 0 ? max(1, (int)round($ap_info['duration_sec'] / 60)) : 0,
+            'has_direct_mp4' => !empty($ap_info['direct_mp4_main']),
+            'embed_url'      => $ap_info['aparat_embed_url']
+        ], JSON_UNESCAPED_UNICODE);
         exit;
     }
 
@@ -923,7 +1026,7 @@ try {
             'status'  => 'success',
             'courses' => $courses,
             'exams'   => $exams_list
-        ]);
+        ], JSON_UNESCAPED_UNICODE);
         exit;
     }
 
@@ -935,7 +1038,7 @@ try {
         $course = $stmt->fetch();
 
         if (!$course) {
-            echo json_encode(['status' => 'error', 'message' => 'دوره یافت نشد.']);
+            echo json_encode(['status' => 'error', 'message' => 'دوره یافت نشد.'], JSON_UNESCAPED_UNICODE);
             exit;
         }
 
@@ -952,7 +1055,7 @@ try {
             'course'   => $course,
             'chapters' => $chapters,
             'lessons'  => $lessons
-        ]);
+        ], JSON_UNESCAPED_UNICODE);
         exit;
     }
 
@@ -969,7 +1072,7 @@ try {
         $sort_order  = max(1, (int)($_POST['sort_order'] ?? 1));
 
         if (empty($title)) {
-            echo json_encode(['status' => 'error', 'message' => 'لطفاً عنوان دوره آموزشی را وارد کنید.']);
+            echo json_encode(['status' => 'error', 'message' => 'لطفاً عنوان دوره آموزشی را وارد کنید.'], JSON_UNESCAPED_UNICODE);
             exit;
         }
 
@@ -986,7 +1089,7 @@ try {
                 WHERE id = ?
             ");
             $upd->execute([$title, $instructor ?: null, $category, $description ?: null, $cover_image ?: null, $is_vip_only, $is_active, $sort_order, $id]);
-            echo json_encode(['status' => 'success', 'course_id' => $id, 'message' => 'مشخصات دوره بروزرسانی شد.']);
+            echo json_encode(['status' => 'success', 'course_id' => $id, 'message' => 'مشخصات دوره بروزرسانی شد.'], JSON_UNESCAPED_UNICODE);
         } else {
             $ins = $pdo->prepare("
                 INSERT INTO courses (title, instructor, category, description, cover_image, is_vip_only, is_active, sort_order)
@@ -998,7 +1101,7 @@ try {
             $pdo->prepare("INSERT INTO course_chapters (course_id, title, sort_order) VALUES (?, 'فصل اول: مباحث پایه و مقدماتی', 1)")
                 ->execute([$new_cid]);
 
-            echo json_encode(['status' => 'success', 'course_id' => $new_cid, 'message' => 'دوره جدید ساخته شد؛ اکنون می‌توانید فصل‌ها و جلسات ویدیویی را اضافه کنید.']);
+            echo json_encode(['status' => 'success', 'course_id' => $new_cid, 'message' => 'دوره جدید ساخته شد؛ اکنون می‌توانید فصل‌ها و جلسات ویدیویی را اضافه کنید.'], JSON_UNESCAPED_UNICODE);
         }
         exit;
     }
@@ -1007,7 +1110,7 @@ try {
     if ($action === 'delete_course') {
         $course_id = (int)($_POST['course_id'] ?? 0);
         $pdo->prepare("DELETE FROM courses WHERE id = ?")->execute([$course_id]);
-        echo json_encode(['status' => 'success', 'message' => 'دوره و جلسات آن حذف شدند.']);
+        echo json_encode(['status' => 'success', 'message' => 'دوره و جلسات آن حذف شدند.'], JSON_UNESCAPED_UNICODE);
         exit;
     }
 
@@ -1019,14 +1122,14 @@ try {
         $sort_order = (int)($_POST['sort_order'] ?? 0);
 
         if ($course_id <= 0 || empty($title)) {
-            echo json_encode(['status' => 'error', 'message' => 'لطفاً عنوان فصل را وارد کنید.']);
+            echo json_encode(['status' => 'error', 'message' => 'لطفاً عنوان فصل را وارد کنید.'], JSON_UNESCAPED_UNICODE);
             exit;
         }
 
         if ($id > 0) {
             $upd = $pdo->prepare("UPDATE course_chapters SET title = ?, sort_order = ? WHERE id = ? AND course_id = ?");
             $upd->execute([$title, max(1, $sort_order), $id, $course_id]);
-            echo json_encode(['status' => 'success', 'chapter_id' => $id, 'message' => 'عنوان فصل ویرایش شد.']);
+            echo json_encode(['status' => 'success', 'chapter_id' => $id, 'message' => 'عنوان فصل ویرایش شد.'], JSON_UNESCAPED_UNICODE);
         } else {
             if ($sort_order <= 0) {
                 $mStmt = $pdo->prepare("SELECT COALESCE(MAX(sort_order), 0) FROM course_chapters WHERE course_id = ?");
@@ -1035,7 +1138,7 @@ try {
             }
             $ins = $pdo->prepare("INSERT INTO course_chapters (course_id, title, sort_order) VALUES (?, ?, ?)");
             $ins->execute([$course_id, $title, $sort_order]);
-            echo json_encode(['status' => 'success', 'chapter_id' => (int)$pdo->lastInsertId(), 'message' => 'فصل جدید به دوره اضافه شد.']);
+            echo json_encode(['status' => 'success', 'chapter_id' => (int)$pdo->lastInsertId(), 'message' => 'فصل جدید به دوره اضافه شد.'], JSON_UNESCAPED_UNICODE);
         }
         exit;
     }
@@ -1044,11 +1147,11 @@ try {
     if ($action === 'delete_chapter') {
         $chapter_id = (int)($_POST['chapter_id'] ?? 0);
         $pdo->prepare("DELETE FROM course_chapters WHERE id = ?")->execute([$chapter_id]);
-        echo json_encode(['status' => 'success']);
+        echo json_encode(['status' => 'success'], JSON_UNESCAPED_UNICODE);
         exit;
     }
 
-    // ۱۷. ساخت یا ویرایش جلسه ویدیویی (با تشخیص خودکار لینک یا کد امبد آپارات)
+    // ۱۷. ساخت یا ویرایش جلسه ویدیویی (با تشخیص خودکار لینک یا کد امبد آپارات و بررسی امنیتی فایل‌ها)
     if ($action === 'save_lesson') {
         $id               = (int)($_POST['id'] ?? 0);
         $course_id        = (int)($_POST['course_id'] ?? 0);
@@ -1069,7 +1172,7 @@ try {
         $sort_order       = (int)($_POST['sort_order'] ?? 0);
 
         if ($course_id <= 0 || $chapter_id <= 0 || empty($title) || empty($video_url)) {
-            echo json_encode(['status' => 'error', 'message' => 'لطفاً فصل، عنوان جلسه و لینک ویدیو (یا لینک آپارات) را وارد نمایید.']);
+            echo json_encode(['status' => 'error', 'message' => 'لطفاً فصل، عنوان جلسه و لینک ویدیو (یا لینک آپارات) را وارد نمایید.'], JSON_UNESCAPED_UNICODE);
             exit;
         }
 
@@ -1105,7 +1208,7 @@ try {
                 $linked_exam_id, $is_free_preview, max(1, $sort_order),
                 $id, $course_id
             ]);
-            echo json_encode(['status' => 'success', 'lesson_id' => $id, 'message' => 'اطلاعات جلسه ویدیویی بروزرسانی شد.']);
+            echo json_encode(['status' => 'success', 'lesson_id' => $id, 'message' => 'اطلاعات جلسه ویدیویی بروزرسانی شد.'], JSON_UNESCAPED_UNICODE);
         } else {
             if ($sort_order <= 0) {
                 $mStmt = $pdo->prepare("SELECT COALESCE(MAX(sort_order), 0) FROM course_lessons WHERE chapter_id = ?");
@@ -1126,7 +1229,7 @@ try {
                 'status'    => 'success',
                 'lesson_id' => (int)$pdo->lastInsertId(),
                 'message'   => 'جلسه ویدیویی جدید به فصل اضافه شد.'
-            ]);
+            ], JSON_UNESCAPED_UNICODE);
         }
         exit;
     }
@@ -1135,12 +1238,13 @@ try {
     if ($action === 'delete_lesson') {
         $lesson_id = (int)($_POST['lesson_id'] ?? 0);
         $pdo->prepare("DELETE FROM course_lessons WHERE id = ?")->execute([$lesson_id]);
-        echo json_encode(['status' => 'success']);
+        echo json_encode(['status' => 'success'], JSON_UNESCAPED_UNICODE);
         exit;
     }
 
-    echo json_encode(['status' => 'error', 'message' => 'اکشن درخواستی نامعتبر است.']);
+    echo json_encode(['status' => 'error', 'message' => 'اکشن درخواستی نامعتبر است.'], JSON_UNESCAPED_UNICODE);
 } catch (Exception $e) {
+    error_log("Courses API Error: " . $e->getMessage());
     http_response_code(500);
-    echo json_encode(['status' => 'error', 'message' => 'خطای سرور: ' . $e->getMessage()]);
+    echo json_encode(['status' => 'error', 'message' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
 }

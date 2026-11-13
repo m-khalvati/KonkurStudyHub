@@ -1,7 +1,7 @@
 <?php
 require_once __DIR__ . '/config/config.php';
 
-// تشخیص اینکه آیا درخواست از سمت اپلیکیشن موبایل (Flutter) ارسال شده است یا مرورگر وب
+// تشخیص درخواست از سمت اپلیکیشن موبایل (Flutter)
 $is_mobile_api = (
     (isset($_SERVER['HTTP_X_CLIENT_PLATFORM']) && strtolower($_SERVER['HTTP_X_CLIENT_PLATFORM']) === 'flutter') ||
     (isset($_GET['client']) && $_GET['client'] === 'flutter') ||
@@ -9,13 +9,55 @@ $is_mobile_api = (
     (isset($_SERVER['HTTP_ACCEPT']) && strpos($_SERVER['HTTP_ACCEPT'], 'application/json') !== false)
 );
 
-// تابع کمکی برای تولید یا دریافت توکن امن کاربر و ارسال پاسخ JSON به فلاتر
-function send_flutter_auth_response(PDO $pdo, array $user, string $message = 'عملیات با موفقیت انجام شد.') {
-    $token = $user['api_token'] ?? null;
-    if (empty($token)) {
-        $token = bin2hex(random_bytes(32));
+// توابع محافظت در برابر حملات Brute-Force
+function check_ip_rate_limit(PDO $pdo): bool {
+    $ip = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+    try {
+        $stmt = $pdo->prepare("SELECT attempts, locked_until FROM auth_rate_limits WHERE ip_address = ? LIMIT 1");
+        $stmt->execute([$ip]);
+        $row = $stmt->fetch();
+        if ($row && !empty($row['locked_until']) && strtotime($row['locked_until']) > time()) {
+            return false; // IP مسدود است
+        }
+    } catch (Exception $ignore) {}
+    return true;
+}
+
+function record_failed_login_attempt(PDO $pdo): void {
+    $ip = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+    try {
+        $stmt = $pdo->prepare("SELECT attempts FROM auth_rate_limits WHERE ip_address = ? LIMIT 1");
+        $stmt->execute([$ip]);
+        $row = $stmt->fetch();
+        $attempts = $row ? ((int)$row['attempts'] + 1) : 1;
+        $locked_until = ($attempts >= 7) ? date('Y-m-d H:i:s', time() + 900) : null; // ۱۵ دقیقه قفل پس از ۷ خطا
+
+        $ins = $pdo->prepare("
+            INSERT INTO auth_rate_limits (ip_address, attempts, locked_until)
+            VALUES (?, ?, ?)
+            ON DUPLICATE KEY UPDATE attempts = VALUES(attempts), locked_until = VALUES(locked_until)
+        ");
+        $ins->execute([$ip, $attempts, $locked_until]);
+    } catch (Exception $ignore) {}
+}
+
+function clear_login_attempts(PDO $pdo): void {
+    $ip = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+    try {
+        $pdo->prepare("DELETE FROM auth_rate_limits WHERE ip_address = ?")->execute([$ip]);
+    } catch (Exception $ignore) {}
+}
+
+// تابع تولید یا دریافت توکن امن کاربر و ارسال پاسخ JSON به فلاتر
+function send_flutter_auth_response(PDO $pdo, array $user, string $message = 'عملیات با موفقیت انجام شد.', bool $force_new_token = false) {
+    $raw_token = get_request_api_token();
+
+    if ($force_new_token || empty($user['api_token']) || empty($raw_token)) {
+        $raw_token = bin2hex(random_bytes(32));
         $upd = $pdo->prepare("UPDATE users SET api_token = ? WHERE id = ?");
-        $upd->execute([$token, (int)$user['id']]);
+        $upd->execute([$raw_token, (int)$user['id']]);
+    } else {
+        $raw_token = $user['api_token'];
     }
 
     $sub_info = get_user_subscription_info($pdo, (int)$user['id']);
@@ -24,7 +66,7 @@ function send_flutter_auth_response(PDO $pdo, array $user, string $message = 'ع
     echo json_encode([
         'status'       => 'success',
         'message'      => $message,
-        'token'        => $token,
+        'token'        => $raw_token,
         'user'         => [
             'id'        => (int)$user['id'],
             'full_name' => $user['full_name'],
@@ -49,7 +91,6 @@ function send_flutter_auth_response(PDO $pdo, array $user, string $message = 'ع
 if ($is_mobile_api) {
     $req_action = $_GET['action'] ?? ($_POST['action'] ?? '');
 
-    // ۱. بررسی اعتبار توکن و دریافت اطلاعات به‌روز کاربر در بدو باز شدن اپ (Splash Screen)
     if ($req_action === 'me') {
         header('Content-Type: application/json; charset=utf-8');
         if (!isset($_SESSION['user_id'])) {
@@ -65,14 +106,14 @@ if ($is_mobile_api) {
             echo json_encode(['status' => 'error', 'message' => 'کاربر یافت نشد.'], JSON_UNESCAPED_UNICODE);
             exit;
         }
-        send_flutter_auth_response($pdo, $current_user, 'اطلاعات حساب همگام‌سازی شد.');
+        send_flutter_auth_response($pdo, $current_user, 'اطلاعات حساب همگام‌سازی شد.', false);
     }
 
-    // ۲. خروج از حساب در اپلیکیشن موبایل
     if ($req_action === 'logout' || isset($_GET['logout'])) {
         if (isset($_SESSION['user_id'])) {
             $pdo->prepare("UPDATE users SET api_token = NULL WHERE id = ?")->execute([(int)$_SESSION['user_id']]);
         }
+        $_SESSION = [];
         session_destroy();
         header('Content-Type: application/json; charset=utf-8');
         echo json_encode(['status' => 'success', 'message' => 'از حساب کاربری خارج شدید.'], JSON_UNESCAPED_UNICODE);
@@ -84,6 +125,7 @@ if ($is_mobile_api) {
 // روند عادی خروج و ریدایرکت در نسخه وب
 // ==========================================
 if (isset($_GET['logout'])) {
+    $_SESSION = [];
     session_destroy();
     header("Location: auth.php");
     exit;
@@ -102,7 +144,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $username = trim($_POST['username'] ?? '');
     $password = $_POST['password'] ?? '';
 
-    if ($action === 'register') {
+    if (!check_ip_rate_limit($pdo)) {
+        $error = 'تعداد تلاش‌های ناموفق شما بیش از حد مجاز بوده است. لطفاً ۱۵ دقیقه دیگر مجدداً تلاش کنید.';
+    } elseif ($action === 'register') {
         $full_name = trim($_POST['full_name'] ?? '');
         $phone     = trim($_POST['phone'] ?? '');
 
@@ -110,8 +154,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $error = 'لطفاً تمامی فیلدها از جمله شماره موبایل را پر کنید.';
         } elseif (!preg_match('/^09[0-9]{9}$/', $phone)) {
             $error = 'شماره موبایل معتبر نیست (فرمت صحیح: 09123456789).';
-        } elseif (strlen($password) < 5) {
-            $error = 'رمز عبور باید حداقل ۵ کاراکتر باشد.';
+        } elseif (!preg_match('/^[a-zA-Z0-9_.-]{3,40}$/', $username)) {
+            $error = 'نام کاربری فقط باید شامل حروف انگلیسی، اعداد و خط تیره باشد (حداقل ۳ کاراکتر).';
+        } elseif (strlen($password) < 6) {
+            $error = 'رمز عبور باید حداقل ۶ کاراکتر باشد.';
         } else {
             $stmt = $pdo->prepare("SELECT id FROM users WHERE username = ?");
             $stmt->execute([$username]);
@@ -132,7 +178,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'phone'     => $phone,
                         'api_token' => $api_token
                     ];
-                    send_flutter_auth_response($pdo, $new_user, 'ثبت‌نام با موفقیت انجام شد و وارد حساب شدید!');
+                    send_flutter_auth_response($pdo, $new_user, 'ثبت‌نام با موفقیت انجام شد و وارد حساب شدید!', false);
                 }
 
                 $success = 'ثبت‌نام با موفقیت انجام شد! اکنون وارد شوید.';
@@ -147,24 +193,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $user = $stmt->fetch();
 
             if ($user && password_verify($password, $user['password_hash'])) {
-                $_SESSION['user_id']   = $user['id'];
+                clear_login_attempts($pdo);
+                session_regenerate_id(true); // جلوگیری از حمله Session Fixation
+
+                $_SESSION['user_id']   = (int)$user['id'];
                 $_SESSION['full_name'] = $user['full_name'];
                 $_SESSION['username']  = $user['username'];
                 $_SESSION['phone']     = $user['phone'] ?? '';
+                $_SESSION['is_admin']  = (int)($user['is_admin'] ?? 0);
 
                 if ($is_mobile_api) {
-                    send_flutter_auth_response($pdo, $user, 'ورود با موفقیت انجام شد.');
+                    send_flutter_auth_response($pdo, $user, 'ورود با موفقیت انجام شد.', false);
                 }
 
                 header("Location: index.php");
                 exit;
             } else {
+                record_failed_login_attempt($pdo);
                 $error = 'نام کاربری یا رمز عبور اشتباه است.';
             }
         }
     }
 
-    // بازگرداندن خطا به صورت JSON در صورتی که درخواست از سمت فلاتر باشد
     if ($is_mobile_api && !empty($error)) {
         header('Content-Type: application/json; charset=utf-8');
         http_response_code(400);
@@ -182,7 +232,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ورود به محیط آموزشی و برنامه‌ریزی کنکور</title>
-    <!-- Local Host Assets (Offline-First) -->
     <link href="assets/css/tailwind-local.css" rel="stylesheet">
     <link href="assets/css/vazirmatn-local.css" rel="stylesheet">
     <script src="https://cdn.tailwindcss.com"></script>
@@ -223,7 +272,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 </div>
             <?php endif; ?>
 
-            <!-- فرم ورود -->
             <form id="form-login" method="POST" class="space-y-4">
                 <input type="hidden" name="action" value="login">
                 <div>
@@ -239,7 +287,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 </button>
             </form>
 
-            <!-- فرم ثبت‌نام -->
             <form id="form-register" method="POST" class="space-y-3.5 hidden">
                 <input type="hidden" name="action" value="register">
                 <div>
@@ -255,7 +302,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     <input type="text" name="username" required dir="ltr" placeholder="ali_1405" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-left">
                 </div>
                 <div>
-                    <label class="block text-xs font-bold text-gray-700 mb-1">رمز عبور (حداقل ۵ کاراکتر)</label>
+                    <label class="block text-xs font-bold text-gray-700 mb-1">رمز عبور (حداقل ۶ کاراکتر)</label>
                     <input type="password" name="password" required dir="ltr" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-left">
                 </div>
                 <button type="submit" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 rounded-lg transition">

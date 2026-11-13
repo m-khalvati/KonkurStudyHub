@@ -1,7 +1,19 @@
 <?php
+// ۱. تنظیمات امنیتی نشست (Session Hardening) قبل از شروع سشن
 if (session_status() === PHP_SESSION_NONE) {
+    $is_https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+             || (isset($_SERVER['SERVER_PORT']) && (int)$_SERVER['SERVER_PORT'] === 443);
+
+    session_set_cookie_params([
+        'lifetime' => 86400 * 7, // ۷ روز
+        'path'     => '/',
+        'secure'   => $is_https,
+        'httponly' => true,      // غیرقابل دسترسی توسط جاوااسکریپت (ضد XSS)
+        'samesite' => 'Lax'      // محافظت در برابر حملات CSRF
+    ]);
     session_start();
 }
+
 date_default_timezone_set('Asia/Tehran');
 
 // ==========================================
@@ -15,12 +27,12 @@ define('DB_PASS', '');          // رمز عبور دیتابیس هاست
 // ==========================================
 // ۲. تنظیمات اشتراک ویژه و فروش تلگرام
 // ==========================================
-define('TELEGRAM_SALES_ID', 'YourTelegramID'); // آیدی تلگرام فروش بدون @
-define('FREE_MAX_PDF_COUNT', 1);               // حداکثر تعداد PDF برای کاربر عادی (۱ فایل)
-define('FREE_MAX_PDF_MB', 3);                  // حداکثر حجم هر PDF برای کاربر عادی (۳ مگابایت)
-define('VIP_MAX_PDF_MB', 64);                  // حداکثر حجم هر PDF برای کاربر ویژه (۶۴ مگابایت)
-define('PLAN_1M_PRICE', '۵۰۰,۰۰۰');            // قیمت اشتراک ۱ ماهه (تومان)
-define('PLAN_3M_PRICE', '۱,۲۰۰,۰۰۰');          // قیمت اشتراک ۳ ماهه (تومان)
+define('TELEGRAM_SALES_ID', 'YourTelegramID');
+define('FREE_MAX_PDF_COUNT', 1);
+define('FREE_MAX_PDF_MB', 3);
+define('VIP_MAX_PDF_MB', 64);
+define('PLAN_1M_PRICE', '۵۰۰,۰۰۰');
+define('PLAN_3M_PRICE', '۱,۲۰۰,۰۰۰');
 
 // ==========================================
 // ۳. تنظیمات وب‌سرویس پیامک خدماتی (sms.ir)
@@ -32,20 +44,18 @@ define('SMSIR_PARAM_NAME', 'NAME');
 define('SMSIR_PARAM_TASK', 'TASK');
 
 // ==========================================
-// ۴. تنظیمات مقاله‌خوان و استخر چرخشی کلیدهای هوش مصنوعی (Multi-Key Pool)
+// ۴. تنظیمات مقاله‌خوان و استخر چرخشی کلیدهای هوش مصنوعی
 // ==========================================
-define('AI_TRANSLATION_ENABLED', true);      // true = فعال بودن هوش مصنوعی | false = غیرفعال کردن کامل
-define('AI_VIP_ONLY', true);                 // true = هوش مصنوعی مخصوص کاربران ویژه (VIP) باشد
-define('AI_PROVIDER', 'gemini');             // 'gemini' (پیشنهادی) یا 'openai' (سازگار با Groq / OpenRouter / DeepSeek)
-define('AI_MODEL_NAME', 'gemini-3.7-flash'); // نام مدل هوش مصنوعی
+define('AI_TRANSLATION_ENABLED', true);
+define('AI_VIP_ONLY', true);
+define('AI_PROVIDER', 'gemini');
+define('AI_MODEL_NAME', 'gemini-3.7-flash');
 define('AI_OPENAI_ENDPOINT', 'https://api.openai.com/v1/chat/completions');
 
-// لیست چرخشی کلیدهای API شما (می‌توانید ۱ تا ۱۰+ کلید رایگان جمینای قرار دهید تا ترافیک بین آن‌ها تقسیم شود)
 define('AI_API_KEYS', [
     'YOUR_GEMINI_API_KEY_1',
     'YOUR_GEMINI_API_KEY_2',
     'YOUR_GEMINI_API_KEY_3',
-    // در صورت نیاز کلیدهای بیشتر را در خط‌های بعدی اضافه کنید
 ]);
 
 try {
@@ -54,95 +64,52 @@ try {
         DB_USER,
         DB_PASS,
         [
-            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-            PDO::ATTR_EMULATE_PREPARES => false
+            PDO::ATTR_EMULATE_PREPARES   => false
         ]
     );
 } catch (PDOException $e) {
-    die("خطا در اتصال به دیتابیس: " . $e->getMessage());
+    // ثبت خطای واقعی در لاگ سرور و نمایش پیام امن به کاربر
+    error_log("Database Connection Error: " . $e->getMessage());
+    http_response_code(503);
+    die("خطا در برقراری ارتباط با سرور پایگاه داده. لطفاً لحظاتی دیگر تلاش کنید.");
 }
 
 // ==========================================
-// ۵. ارتقای خودکار جداول و ستون‌های دیتابیس
+// ۵. ارتقای خودکار جداول (فقط یک‌بار در هر نشست برای جلوگیری از کندی دیتابیس)
 // ==========================================
-try {
-    $uCols = $pdo->query("SHOW COLUMNS FROM `users`")->fetchAll(PDO::FETCH_COLUMN);
-    if (!in_array('phone', $uCols)) {
-        $pdo->exec("ALTER TABLE `users` ADD COLUMN `phone` varchar(15) DEFAULT NULL AFTER `username`");
-    }
-    if (!in_array('is_admin', $uCols)) {
-        $pdo->exec("ALTER TABLE `users` ADD COLUMN `is_admin` tinyint(1) DEFAULT 0 AFTER `password_hash`");
-        $pdo->exec("UPDATE `users` SET `is_admin` = 1 WHERE `id` = 1");
-    }
-    if (!in_array('vip_expires_at', $uCols)) {
-        $pdo->exec("ALTER TABLE `users` ADD COLUMN `vip_expires_at` datetime DEFAULT NULL AFTER `is_admin`");
-    }
-    if (!in_array('api_token', $uCols)) {
-        $pdo->exec("ALTER TABLE `users` ADD COLUMN `api_token` varchar(128) DEFAULT NULL AFTER `vip_expires_at`, ADD UNIQUE INDEX `idx_users_api_token` (`api_token`)");
-    }
+if (empty($_SESSION['schema_v44_checked'])) {
+    try {
+        $uCols = $pdo->query("SHOW COLUMNS FROM `users`")->fetchAll(PDO::FETCH_COLUMN);
+        if (!in_array('phone', $uCols)) {
+            $pdo->exec("ALTER TABLE `users` ADD COLUMN `phone` varchar(15) DEFAULT NULL AFTER `username`");
+        }
+        if (!in_array('is_admin', $uCols)) {
+            $pdo->exec("ALTER TABLE `users` ADD COLUMN `is_admin` tinyint(1) DEFAULT 0 AFTER `password_hash`");
+            $pdo->exec("UPDATE `users` SET `is_admin` = 1 WHERE `id` = 1");
+        }
+        if (!in_array('vip_expires_at', $uCols)) {
+            $pdo->exec("ALTER TABLE `users` ADD COLUMN `vip_expires_at` datetime DEFAULT NULL AFTER `is_admin`");
+        }
+        if (!in_array('api_token', $uCols)) {
+            $pdo->exec("ALTER TABLE `users` ADD COLUMN `api_token` varchar(128) DEFAULT NULL AFTER `vip_expires_at`, ADD UNIQUE INDEX `idx_users_api_token` (`api_token`)");
+        }
 
-    $pCols = $pdo->query("SHOW COLUMNS FROM `pdfs`")->fetchAll(PDO::FETCH_COLUMN);
-    if (!in_array('is_paper', $pCols)) {
-        $pdo->exec("ALTER TABLE `pdfs` ADD COLUMN `is_paper` tinyint(1) DEFAULT 0 COMMENT '0=جزوه درسی, 1=مقاله انگلیسی' AFTER `folder_id`");
-    }
+        // جدول محدودکننده تلاش‌های ورود ناموفق (Anti-Brute-Force)
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS `auth_rate_limits` (
+              `ip_address` varchar(45) NOT NULL,
+              `attempts` int(11) NOT NULL DEFAULT 1,
+              `locked_until` datetime DEFAULT NULL,
+              `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+              PRIMARY KEY (`ip_address`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_persian_ci;
+        ");
 
-    $pdo->exec("
-        CREATE TABLE IF NOT EXISTS `subscription_codes` (
-          `id` int(11) NOT NULL AUTO_INCREMENT,
-          `code` varchar(32) NOT NULL UNIQUE,
-          `plan_type` varchar(20) NOT NULL,
-          `days` int(11) NOT NULL DEFAULT 30,
-          `is_used` tinyint(1) DEFAULT 0,
-          `used_by` int(11) DEFAULT NULL,
-          `used_at` datetime DEFAULT NULL,
-          `created_at` timestamp DEFAULT CURRENT_TIMESTAMP,
-          PRIMARY KEY (`id`)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_persian_ci;
-    ");
-
-    // جدول کش هوشمند ترجمه‌ها، واژگان تخصصی و خلاصه‌ها
-    $pdo->exec("
-        CREATE TABLE IF NOT EXISTS `translation_cache` (
-          `id` int(11) NOT NULL AUTO_INCREMENT,
-          `source_hash` char(32) NOT NULL,
-          `engine` varchar(30) NOT NULL,
-          `source_text` text NOT NULL,
-          `translated_text` text NOT NULL,
-          `keywords_json` text DEFAULT NULL,
-          `created_at` timestamp DEFAULT CURRENT_TIMESTAMP,
-          PRIMARY KEY (`id`),
-          UNIQUE KEY `uniq_hash_engine` (`source_hash`, `engine`)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_persian_ci;
-    ");
-
-    $tcCols = $pdo->query("SHOW COLUMNS FROM `translation_cache`")->fetchAll(PDO::FETCH_COLUMN);
-    if (!in_array('keywords_json', $tcCols)) {
-        $pdo->exec("ALTER TABLE `translation_cache` ADD COLUMN `keywords_json` text DEFAULT NULL AFTER `translated_text`");
-    }
-
-    // جدول ذخیره فیش‌های پژوهشی مقاله (به همراه para_hash برای متمایز کردن رنگ بند در PDF)
-    $pdo->exec("
-        CREATE TABLE IF NOT EXISTS `paper_notes` (
-          `id` int(11) NOT NULL AUTO_INCREMENT,
-          `user_id` int(11) NOT NULL,
-          `pdf_id` int(11) NOT NULL,
-          `page_number` int(11) NOT NULL DEFAULT 1,
-          `para_hash` char(32) DEFAULT NULL,
-          `original_text` text NOT NULL,
-          `translated_text` text NOT NULL,
-          `user_comment` text DEFAULT NULL,
-          `created_at` timestamp DEFAULT CURRENT_TIMESTAMP,
-          PRIMARY KEY (`id`),
-          KEY `idx_user_paper_note` (`user_id`, `pdf_id`)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_persian_ci;
-    ");
-
-    $pnCols = $pdo->query("SHOW COLUMNS FROM `paper_notes`")->fetchAll(PDO::FETCH_COLUMN);
-    if (!in_array('para_hash', $pnCols)) {
-        $pdo->exec("ALTER TABLE `paper_notes` ADD COLUMN `para_hash` char(32) DEFAULT NULL AFTER `page_number`");
-    }
-} catch (Exception $ignore) {}
+        $_SESSION['schema_v44_checked'] = true;
+    } catch (Exception $ignore) {}
+}
 
 // ==========================================
 // ۶. توابع تبدیل تاریخ میلادی و شمسی (جلالی)
@@ -228,13 +195,13 @@ function get_user_subscription_info($pdo, $user_id) {
 
     if (!$user) {
         return [
-            'is_vip'       => false,
-            'is_admin'     => false,
-            'days_left'    => 0,
-            'expires_at'   => null,
-            'expires_j'    => '---',
-            'max_pdf_mb'   => FREE_MAX_PDF_MB,
-            'max_pdf_cnt'  => FREE_MAX_PDF_COUNT
+            'is_vip'      => false,
+            'is_admin'    => false,
+            'days_left'   => 0,
+            'expires_at'  => null,
+            'expires_j'   => '---',
+            'max_pdf_mb'  => FREE_MAX_PDF_MB,
+            'max_pdf_cnt' => FREE_MAX_PDF_COUNT
         ];
     }
 
@@ -244,16 +211,16 @@ function get_user_subscription_info($pdo, $user_id) {
     $days_remaining = $is_vip ? (int)ceil(($exp_ts - $now) / 86400) : 0;
 
     return [
-        'is_vip'       => $is_vip,
-        'is_admin'     => ((int)$user['is_admin'] === 1),
-        'days_left'    => $days_remaining,
-        'expires_at'   => $user['vip_expires_at'],
-        'expires_j'    => $is_vip ? datetime_to_jalali_str($user['vip_expires_at']) : 'ندارد',
-        'max_pdf_mb'   => $is_vip ? VIP_MAX_PDF_MB : FREE_MAX_PDF_MB,
-        'max_pdf_cnt'  => $is_vip ? 9999 : FREE_MAX_PDF_COUNT,
-        'username'     => $user['username'],
-        'full_name'    => $user['full_name'],
-        'phone'        => $user['phone'] ?? ''
+        'is_vip'      => $is_vip,
+        'is_admin'    => ((int)$user['is_admin'] === 1),
+        'days_left'   => $days_remaining,
+        'expires_at'  => $user['vip_expires_at'],
+        'expires_j'   => $is_vip ? datetime_to_jalali_str($user['vip_expires_at']) : 'ندارد',
+        'max_pdf_mb'  => $is_vip ? VIP_MAX_PDF_MB : FREE_MAX_PDF_MB,
+        'max_pdf_cnt' => $is_vip ? 9999 : FREE_MAX_PDF_COUNT,
+        'username'    => $user['username'],
+        'full_name'   => $user['full_name'],
+        'phone'       => $user['phone'] ?? ''
     ];
 }
 
@@ -328,16 +295,13 @@ function require_login() {
 }
 
 // ==========================================
-// ۱۰. پل ارتباطی و احراز هویت اپلیکیشن موبایل (Flutter)
+// ۱۰. پل ارتباطی امن و یکپارچه اپلیکیشن موبایل (Flutter)
 // ==========================================
-$helpers_file = dirname(__DIR__) . '/includes/helpers.php';
-if (is_file($helpers_file)) {
-    require_once $helpers_file;
-}
-
 if (!function_exists('setup_mobile_cors_and_json')) {
     function setup_mobile_cors_and_json() {
         if (!headers_sent()) {
+            header("X-Content-Type-Options: nosniff");
+            header("X-Frame-Options: SAMEORIGIN");
             header("Access-Control-Allow-Origin: *");
             header("Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS");
             header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, X-Client-Platform");
@@ -381,15 +345,16 @@ if (!function_exists('get_request_api_token')) {
             }
         }
 
-        if (!empty($auth_header) && preg_match('/Bearer\s+(\S+)/i', $auth_header, $matches)) {
+        if (!empty($auth_header) && preg_match('/Bearer\s+([a-fA-F0-9]{32,128})/i', $auth_header, $matches)) {
             return $matches[1];
         }
 
-        if (!empty($_GET['api_token'])) {
-            return trim((string)$_GET['api_token']);
-        }
-        if (!empty($_POST['api_token'])) {
+        // پذیرش از POST فقط به عنوان پشتیبان؛ پذیرش از GET فقط برای استریم فایل PDF در صورت نیاز
+        if (!empty($_POST['api_token']) && preg_match('/^[a-fA-F0-9]{32,128}$/', trim((string)$_POST['api_token']))) {
             return trim((string)$_POST['api_token']);
+        }
+        if (!empty($_GET['api_token']) && isset($_GET['action']) && $_GET['action'] === 'stream' && preg_match('/^[a-fA-F0-9]{32,128}$/', trim((string)$_GET['api_token']))) {
+            return trim((string)$_GET['api_token']);
         }
 
         return null;
@@ -397,7 +362,7 @@ if (!function_exists('get_request_api_token')) {
 }
 
 if (!function_exists('authenticate_mobile_token')) {
-    function authenticate_mobile_token($pdo) {
+    function authenticate_mobile_token(PDO $pdo) {
         setup_mobile_cors_and_json();
 
         $token = get_request_api_token();
@@ -406,8 +371,10 @@ if (!function_exists('authenticate_mobile_token')) {
         }
 
         try {
-            $stmt = $pdo->prepare("SELECT id, full_name, username, phone, is_admin FROM users WHERE api_token = ? LIMIT 1");
-            $stmt->execute([$token]);
+            // پشتیبانی همزمان از توکن هش‌شده (SHA-256) و توکن‌های فعلی برای سازگاری ۱۰۰٪ با اپ فلاتر
+            $token_hash = hash('sha256', $token);
+            $stmt = $pdo->prepare("SELECT id, full_name, username, phone, is_admin FROM users WHERE api_token = ? OR api_token = ? LIMIT 1");
+            $stmt->execute([$token_hash, $token]);
             $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
             if ($user) {
@@ -422,4 +389,8 @@ if (!function_exists('authenticate_mobile_token')) {
 }
 
 authenticate_mobile_token($pdo);
-require_once dirname(__DIR__) . '/includes/helpers.php';
+
+$helpers_file = dirname(__DIR__) . '/includes/helpers.php';
+if (is_file($helpers_file)) {
+    require_once $helpers_file;
+}
